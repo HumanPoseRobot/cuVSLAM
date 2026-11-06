@@ -38,6 +38,8 @@
 #include "pipelines/imu_fusion_context.h"
 #include "pipelines/sfm_solver_interface.h"
 
+#include "pipelines/temporal_landmarks.h"
+
 namespace cuvslam::pipelines {
 
 class SbaServiceBase;
@@ -100,11 +102,17 @@ private:
   // Triangulate, lift, push the keyframe to the map, refresh planes, and notify SBA.
   void process_keyframe(int64_t time_ns, const Isometry3T& world_from_rig, const std::vector<camera::Observation>& obs,
                         const pnp::RGBDInfos& depth_infos, const map::State& state,
-                        const sba_imu::IMUPreintegration& preint, const sba::Settings& sba_settings);
+                        const sba_imu::IMUPreintegration& preint, const sba::Settings& sba_settings, bool run_sba = true);
 
   void exportTracks(const std::vector<camera::Observation>& observations, std::vector<Track2D>& out_tracks2d,
                     Tracks3DMap& out_tracks3d, const Isometry3T& rig_from_world) const;
 
+  TemporalLandmarks temporal_;
+  bool temporal_audit_ = false;
+  bool temporal_insert_ = false;
+  bool metric_init_enabled_ = false;
+  bool temporal_ready_ = false;
+  bool temporal_strict_ = false;
   camera::Rig rig_;
   map::UnifiedMap& map_;
 

@@ -101,7 +101,7 @@ public:
   // solve failed, swaps prev/curr, refreshes biases from the latest map keyframe, and updates the
   // per-frame preintegration anchor.
   FrameResult finalize_frame(bool pnp_result, bool no_drops, int64_t time_ns, sof::FrameState fs,
-                             const StateMachineSettings& sm_settings);
+                             const StateMachineSettings& sm_settings, bool metric_bootstrap = false);
 
   // Builds the State to attach to a new keyframe (uses last_valid_pose when the current frame was
   // lost so the map remains consistent).
@@ -150,6 +150,7 @@ private:
   bool joint_enabled_ = false;
   bool joint_active_ = false;
   bool has_joint_prior_ = false;
+  bool metric_bootstrap_ = false;
   bool enable_imu_sba_init_ = true;
   bool is_first_run_ = true;
   bool integrated_ = false;

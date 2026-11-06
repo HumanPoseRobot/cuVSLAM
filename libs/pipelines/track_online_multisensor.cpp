@@ -18,6 +18,8 @@
 #include "pipelines/track_online_multisensor.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <string_view>
 
 #include "camera/observation.h"
 #include "camera/rig.h"
@@ -107,6 +109,15 @@ SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::R
 
   imu_ = std::make_unique<ImuFusionContext>(map_, rig_, calib, pose_estimator_);
   imu_->register_gravity_callback();
+  const char* mode = std::getenv("CUVSLAM_CAM01_TEMPORAL");
+  if (mode && rig_.num_cameras==4 && !sba_settings.async) {
+    const std::string_view name(mode);
+    temporal_audit_ = name=="audit" || name=="insert" || name=="strict";
+    temporal_insert_ = name=="insert" || name=="strict";
+    temporal_strict_ = name=="strict";
+    const char* boot = std::getenv("CUVSLAM_METRIC_INIT");
+    metric_init_enabled_ = temporal_audit_ && boot && std::string_view(boot) == "1";
+  }
 }
 
 SolverSfMMultisensor::~SolverSfMMultisensor() = default;
@@ -114,6 +125,8 @@ SolverSfMMultisensor::~SolverSfMMultisensor() = default;
 const camera::Rig& SolverSfMMultisensor::getRig() const { return rig_; }
 
 void SolverSfMMultisensor::reset() {
+  temporal_.clear();
+  temporal_ready_ = false;
   depth_maps_.reset();
   if (sba_service_) {
     sba_service_->restart();
@@ -223,7 +236,10 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
     }
   }
 
-  auto frame = imu_->finalize_frame(pnp_result, prep.no_drops, time_ns, frameState, solver_settings.sm);
+  const bool bootstrap = metric_init_enabled_ && !map_.get_gravity() &&
+                         std::none_of(depth_infos.begin(),depth_infos.end(),[](auto p){return p!=nullptr;});
+  auto frame = imu_->finalize_frame(pnp_result, prep.no_drops, time_ns, frameState, solver_settings.sm, bootstrap);
+  const bool just_initialized = bootstrap && map_.get_gravity().has_value();
   world_from_rig = frame.world_from_rig;
   static_info_exp = frame.static_info_exp;
   prev_rig_from_world_ = world_from_rig.inverse();
@@ -241,6 +257,11 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
     }
   }
 
+  const bool ready = temporal_audit_ && pnp_result && prep.no_drops &&
+                     prep.imu_state == StateMachine::State::Ok &&
+                     std::none_of(depth_infos.begin(),depth_infos.end(),[](auto p){ return p != nullptr; });
+  if (!ready || !temporal_ready_) temporal_.clear();
+  temporal_ready_ = ready;
   if (frame.lost) {
     return false;
   }
@@ -259,12 +280,14 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   if (frameState == sof::FrameState::Key) {
     map::State state = imu_->build_keyframe_state(prev_rig_from_world_, frame.lost);
     process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, imu_->last_kf_preint(),
-                     solver_settings.sba);
+                     solver_settings.sba, !just_initialized);
     if (!solver_settings.sba.async && sba_service_ && imu_->read_committed_state(time_ns, world_from_rig, static_info_exp)) {
       prev_rig_from_world_ = world_from_rig.inverse();
     }
     imu_->on_keyframe_committed(frame.lost);
+    temporal_.clear();
   }
+  if (temporal_ready_) temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,12u);
 
   if (tracks2d && tracks3d) {
     TRACE_EVENT export_ev = profiler_domain_.trace_event("exportTracks");
@@ -278,7 +301,7 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
                                             const std::vector<camera::Observation>& obs,
                                             const pnp::RGBDInfos& depth_infos, const map::State& state,
                                             const sba_imu::IMUPreintegration& preint,
-                                            const sba::Settings& sba_settings) {
+                                            const sba::Settings& sba_settings, bool run_sba) {
   TRACE_EVENT kf_ev = profiler_domain_.trace_event("keyframe_processing");
 
   std::vector<Landmark> landmarks;
@@ -287,6 +310,11 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
     landmarks = depth_maps_.build_keyframe_landmarks(world_from_rig, obs, depth_infos);
   }
 
+  if (temporal_ready_) {
+    // Slots 2,3 are physical cameras 0,1 in the experimental rig [2,3,0,1].
+    temporal_.extend(time_ns, rig_, world_from_rig, obs, recent_landmarks_, 12u, temporal_insert_,
+                     temporal_strict_ ? 4.f : 2.f, temporal_strict_ ? 1.f : 1.75f, landmarks);
+  }
   map_.add_keyframe(time_ns, state, preint, obs, landmarks);
 
   {
@@ -295,7 +323,7 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
   }
   RERUN(logPlanes, depth_maps_.planes(), "world/planes");
 
-  if (sba_service_) {
+  if (sba_service_ && run_sba) {
     TRACE_EVENT sba_ev = profiler_domain_.trace_event("sba_notify");
     TraceMessage("VIO_FIX_SBA frames=%d fixed=%d iterations=%d robust=%.6f", sba_settings.num_inertial_sba_frames,
                  sba_settings.num_inertial_fixed_sba_frames, sba_settings.num_inertial_sba_iterations,

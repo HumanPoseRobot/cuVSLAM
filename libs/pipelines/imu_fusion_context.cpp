@@ -123,6 +123,19 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
                (right.w_from_imu.translation() - prediction.w_from_imu.translation()).norm(),
                (right.velocity - prediction.velocity).norm(), (right.gyro_bias - prediction.gyro_bias).norm(),
                (right.acc_bias - prediction.acc_bias).norm());
+  if (ok && std::getenv("CUVSLAM_CAM01_TEMPORAL")) {
+    std::array<int,4> inliers{};
+    const Isometry3T corrected = calib.rig_from_imu() * right.w_from_imu.inverse();
+    for (size_t i=0; i<input.points.size(); ++i) {
+      const auto cam = input.camera_ids[i];
+      const Vector3T pc = rig.camera_from_rig[cam] * corrected * input.points[i];
+      if (pc.z()<=input.min_depth) continue;
+      const Vector2T error = (pc.hnormalized()-input.observation_xys[i]).cwiseProduct(rig.intrinsics[cam]->getFocal());
+      if (error.norm() <= 2.f) ++inliers[cam];
+    }
+    TraceMessage("CAM01_QUALITY t=%lld inliers=%d,%d,%d,%d",static_cast<long long>(time_ns),
+                 inliers[0],inliers[1],inliers[2],inliers[3]);
+  }
   if (ok) result = std::move(right);
   return ok;
 }
@@ -333,7 +346,8 @@ bool ImuFusionContext::solve_visual(const std::unordered_map<TrackId, Vector3T>&
 
 ImuFusionContext::FrameResult ImuFusionContext::finalize_frame(bool pnp_result, bool no_drops, int64_t time_ns,
                                                                sof::FrameState fs,
-                                                               const StateMachineSettings& sm_settings) {
+                                                               const StateMachineSettings& sm_settings, bool metric_bootstrap) {
+  metric_bootstrap_ = metric_bootstrap;
   prev_pose_ts_ns_ = time_ns;
 
   StateMachine::State imu_state;
@@ -534,7 +548,7 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
   TRACE_EVENT ev1 = profiler_domain_.trace_event("update map");
   const Vector3T gravity_for_sba = Rgravity * optimizer_.get_default_gravity();
 
-  if (enable_imu_sba_init_) {
+  if (enable_imu_sba_init_ && !metric_bootstrap_) {
     run_imu_sba_init(recent_map, gravity_for_sba, gravity_cache, observations_per_kf);
   }
 
@@ -556,6 +570,21 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
   // Snap live tracking state to the last keyframe pose (closest temporal match for the next
   // tracking frame).
   snap_to_keyframe_pose(gravity_cache.back());
+  if (metric_bootstrap_) {
+    // The gravity initializer estimates velocity at the last committed keyframe.
+    // Propagate that velocity to the image being finalized without moving its visual pose.
+    const auto& anchor = gravity_cache.back();
+    const int64_t anchor_ns = recent_map.consecutive_keyframes.back().keyframe->time_ns();
+    sba_imu::IMUPreintegration interval(calib_, imu_storage_, anchor.gyro_bias, anchor.acc_bias,
+                                       anchor_ns, prev_pose_ts_ns_);
+    sba_imu::Pose prediction;
+    const double dt = (prev_pose_ts_ns_ - anchor_ns) * 1e-9;
+    if (dt > 0 && std::abs(interval.dT_s-dt)<1e-5 &&
+        anchor.predict_pose(gravity_for_sba, interval, prediction) && prediction.velocity.allFinite())
+      curr_pose_.velocity = prediction.velocity;
+    TraceMessage("CAM01_METRIC_INIT t=%lld anchor=%lld dt=%.6f",static_cast<long long>(prev_pose_ts_ns_),
+                 static_cast<long long>(anchor_ns), interval.dT_s);
+  }
 
   map_.set_gravity(gravity_for_sba);
   return true;

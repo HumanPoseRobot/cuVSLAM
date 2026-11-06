@@ -163,3 +163,36 @@ TEST(TrackLifterTest, EmptyObservations) {
 }
 
 }  // namespace test::pipelines
+
+
+#include "pipelines/temporal_landmarks.h"
+namespace cuvslam::pipelines {
+namespace {
+std::vector<TemporalLandmarks::Ray> test_rays(bool rotate_only) {
+  std::vector<TemporalLandmarks::Ray> views;
+  const Vector3T point(.2f, .1f, 1.5f);
+  for(int i=0;i<4;++i) {
+    Isometry3T pose=Isometry3T::Identity();
+    pose.linear()=Eigen::AngleAxisf(.06f*i,Vector3T::UnitY()).toRotationMatrix();
+    if (!rotate_only) pose.translation().x()=.05f*i;
+    const Vector3T pc=pose.inverse()*point;
+    views.push_back({pose,pc.hnormalized(),Vector2T(180,180)});
+  }
+  return views;
+}
+TEST(TemporalLandmarksTest, RecoversMetricPointFromSameCameraMotion) {
+  Vector3T p;
+  EXPECT_EQ(TemporalLandmarks::fit(test_rays(false),p,2,1.75f),TemporalLandmarks::Result::Accepted);
+  EXPECT_LT((p-Vector3T(.2f,.1f,1.5f)).norm(),1e-4f);
+}
+TEST(TemporalLandmarksTest, RejectsPureRotationAndInconsistentThirdView) {
+  Vector3T p;
+  EXPECT_EQ(TemporalLandmarks::fit(test_rays(true),p,2,1.75f),TemporalLandmarks::Result::Parallax);
+  auto views=test_rays(false);
+  views[1].xy.y()+=.1f;
+  EXPECT_NE(TemporalLandmarks::fit(views,p,2,1.75f),TemporalLandmarks::Result::Accepted);
+  views.resize(2);
+  EXPECT_EQ(TemporalLandmarks::fit(views,p,2,1.75f),TemporalLandmarks::Result::FewViews);
+}
+} // namespace
+} // namespace cuvslam::pipelines
