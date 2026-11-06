@@ -40,6 +40,7 @@
 #include "sof/sof_multicamera_interface.h"
 
 #include "pipelines/tracker_state_machine.h"
+#include "pipelines/inertial_pnp.h"
 
 namespace cuvslam::pipelines {
 
@@ -82,7 +83,7 @@ public:
   bool solve_inertial(const std::unordered_map<TrackId, Vector3T>& landmarks,
                       const std::vector<camera::Observation>& observations, const pnp::RGBDInfos& depth_infos,
                       const std::vector<map::Plane>& planes, const std::vector<Vector3T>& depth_points,
-                      int64_t time_ns);
+                      int64_t time_ns, const InertialPnPSettings& settings, bool interval_healthy);
 
   // Pure-visual RGBD solve while IMU is still uninitialized. Same data flow, just without the IMU
   // SE3 prior factor.
@@ -111,6 +112,9 @@ public:
 
   // Resets last_kf_preint_ to a fresh preintegration starting from the current bias estimate.
   void on_keyframe_committed(bool lost);
+
+  std::optional<Matrix3T> joint_position_covariance() const;
+  bool read_committed_state(int64_t time_ns, Isometry3T& world_from_rig, Matrix6T& info);
 
   std::optional<Vector3T> get_gravity() const;
 
@@ -143,6 +147,9 @@ private:
   sba_imu::IMUBundlerCpuFixedVel init_bundler_;
   StateMachine sm_;
 
+  bool joint_enabled_ = false;
+  bool joint_active_ = false;
+  bool has_joint_prior_ = false;
   bool enable_imu_sba_init_ = true;
   bool is_first_run_ = true;
   bool integrated_ = false;

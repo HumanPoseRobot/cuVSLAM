@@ -48,8 +48,9 @@ public:
 
   // Atomically records sba_settings for the next task run and wakes the worker.
   // In synchronous mode, snapshots and runs the task inline.
-  void trigger(const sba::Settings& s) {
+  void trigger(const sba::Settings& s, const std::optional<Matrix3T>& latest_position_cov = std::nullopt) {
     if (!async_) {
+      sync_position_cov_ = latest_position_cov;
       pending_ = s;
       on_task_start();
       service_task();
@@ -68,6 +69,7 @@ protected:
   // settings into current_ so service_task() never races with trigger().
   void on_task_start() override { current_ = pending_; }
 
+  std::optional<Matrix3T> sync_position_cov_;  // Only populated on the synchronous caller thread.
   sba::Settings pending_;  // written by trigger() under mutex
   sba::Settings current_;  // snapshotted by on_task_start(); read-only in service_task()
 };
@@ -185,7 +187,8 @@ void run_sba(const UnifiedMap::SubMap& recent_map, const camera::Rig& rig, const
 
 template <typename bundler_type>
 void run_imu_sba(const UnifiedMap::SubMap& recent_map, const Vector3T& gravity, const camera::Rig& rig,
-                 const imu::ImuCalibration& calib, const sba::Settings& sba_settings, bundler_type& bundler) {
+                 const imu::ImuCalibration& calib, const sba::Settings& sba_settings, bundler_type& bundler,
+                 const std::optional<Matrix3T>& latest_cov = std::nullopt) {
   sba_imu::ImuBAProblem problem;
   problem.rig = rig;
   problem.gravity = gravity;
@@ -277,6 +280,23 @@ void run_imu_sba(const UnifiedMap::SubMap& recent_map, const Vector3T& gravity, 
 
   problem.max_iterations = sba_settings.num_inertial_sba_iterations;
   bool res = bundler.solve(problem);
+
+  // Check the complete proposed map update against the already marginalized
+  // foreground position at the same timestamp. Reject before changing any landmark,
+  // keyframe, or preintegration. All estimates remain in the same world frame.
+  if (res && latest_cov && !problem.rig_poses.empty()) {
+    const auto& kf = recent_map.consecutive_keyframes.back().keyframe;
+    const Isometry3T before = kf->get_state().rig_from_w.inverse() * calib.rig_from_imu();
+    const Vector3T delta = problem.rig_poses.back().w_from_imu.translation() - before.translation();
+    // Frontend and backend reuse tracks. This is an engineering consistency gate,
+    // with 2x sigma inflation and a 5 mm registration floor, not an independent sensor test.
+    const Matrix3T covariance = 4.f * (*latest_cov) + 0.000025f * Matrix3T::Identity();
+    const auto factor = covariance.ldlt();
+    const float score = delta.dot(factor.solve(delta));
+    res = factor.isPositive() && std::isfinite(score) && score <= 16.27f;
+    TraceMessage("JOINT_MAP_CHECK t=%lld accept=%d score=%.5f dp=%.8f",
+                 static_cast<long long>(kf->time_ns()), static_cast<int>(res), score, delta.norm());
+  }
 
   // copy data back only if solver improved cost
   if (res) {
@@ -372,7 +392,7 @@ public:
     // first run
     if (gravity) {
       TRACE_EVENT ev1 = profiler_domain_.trace_event("run_imu_sba");
-      run_imu_sba(recent_map, *gravity, rig_, calib_, current_, imu_bundler_);
+      run_imu_sba(recent_map, *gravity, rig_, calib_, current_, imu_bundler_, sync_position_cov_);
       TraceDebug("IMU SBA has finished");
     } else {
       TRACE_EVENT ev1 = profiler_domain_.trace_event("run_sba");

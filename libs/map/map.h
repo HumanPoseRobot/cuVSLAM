@@ -87,7 +87,7 @@ public:
 
   struct LandmarkAndObserv {
     LandmarkPtr landmark;
-    FixedArray<camera::Observation, 3> observations;
+    FixedArray<camera::Observation, 4> observations;
   };
 
   struct SubMap {

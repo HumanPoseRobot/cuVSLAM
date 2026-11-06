@@ -58,12 +58,14 @@ void UnifiedMap::add_keyframe(int64_t time_ns, const State& state, const IMUPrei
     }
   }
 
+  size_t fourth_observations = 0;
   FastMap<TrackId, LandmarkAndObserv> old_landmarks;
   for (const auto& obs : observations) {
     auto it = keyframes_from_landmark_.find(obs.id);
     if (it == keyframes_from_landmark_.end()) {
       // obs of new landmark
       auto& l_o = new_landmarks[obs.id];
+      if (l_o.observations.size() == 3) ++fourth_observations;
       l_o.observations.try_push_back(obs);
 
       if (!l_o.landmark) {
@@ -78,10 +80,12 @@ void UnifiedMap::add_keyframe(int64_t time_ns, const State& state, const IMUPrei
 
       auto& old_lm = old_landmarks[obs.id];
       old_lm.landmark = landmark;
+      if (old_lm.observations.size() == 3) ++fourth_observations;
       old_lm.observations.try_push_back(obs);
     }
   }
 
+  if (fourth_observations > 0) TraceMessage("JOINT_FOURTH t=%lld n=%zu", static_cast<long long>(time_ns), fourth_observations);
   auto& landmarks = landmarks_from_keyframe_[new_kf];
   landmarks = std::move(new_landmarks);
   std::move(old_landmarks.begin(), old_landmarks.end(), std::inserter(landmarks, landmarks.begin()));

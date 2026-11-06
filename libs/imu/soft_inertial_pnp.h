@@ -48,6 +48,9 @@ struct StereoPnPInput {
   float robustifier_scale_tr = 1.f;
   float imu_penalty = 1.0;
 
+  float min_depth = 1.f;
+  bool shared_bias = false;
+  bool cost_shortcut = true;
   bool freeze_bias = false;  // If true, do not update gyro/acc bias in PnP (let SBA handle it)
 
   std::vector<float> outlier_thresh = {10.f, 5.f, 5.f, 5.f};

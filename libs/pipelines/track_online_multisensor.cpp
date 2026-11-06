@@ -216,7 +216,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
 
     if (prep.imu_state == StateMachine::State::Ok) {
       pnp_result = imu_->solve_inertial(recent_landmarks_, obs_vector_, depth_infos, depth_maps_.planes(),
-                                        depth_maps_.depth_points(), time_ns);
+                                        depth_maps_.depth_points(), time_ns, solver_settings.imu_pnp, prep.no_drops);
     } else {
       pnp_result = imu_->solve_visual(recent_landmarks_, obs_vector_, depth_infos, depth_maps_.planes(),
                                       depth_maps_.depth_points(), time_ns);
@@ -260,6 +260,9 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
     map::State state = imu_->build_keyframe_state(prev_rig_from_world_, frame.lost);
     process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, imu_->last_kf_preint(),
                      solver_settings.sba);
+    if (!solver_settings.sba.async && sba_service_ && imu_->read_committed_state(time_ns, world_from_rig, static_info_exp)) {
+      prev_rig_from_world_ = world_from_rig.inverse();
+    }
     imu_->on_keyframe_committed(frame.lost);
   }
 
@@ -297,7 +300,8 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
     TraceMessage("VIO_FIX_SBA frames=%d fixed=%d iterations=%d robust=%.6f", sba_settings.num_inertial_sba_frames,
                  sba_settings.num_inertial_fixed_sba_frames, sba_settings.num_inertial_sba_iterations,
                  sba_settings.inertial_robustifier_scale);
-    sba_service_->trigger(sba_settings);
+    const auto cov = imu_ && !sba_settings.async ? imu_->joint_position_covariance() : std::nullopt;
+    sba_service_->trigger(sba_settings, cov);
   }
 }
 

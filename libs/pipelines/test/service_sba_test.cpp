@@ -209,4 +209,44 @@ TEST(ServiceSbaTest, TriggerSnapshotsLatestSettings) {
   service.trigger(settings);
   EXPECT_EQ(service.observed.num_inertial_sba_frames, 12);
 }
+TEST(ServiceSbaTest, PreservesFourObservationsForNewAndExistingTrack) {
+  UnifiedMap map(8);
+  std::vector<camera::Observation> observations;
+  for (int cam = 0; cam < 4; ++cam)
+    observations.emplace_back(cam, 42, Vector2T::Zero(), Matrix2T::Identity());
+  for (int t = 0; t < 2; ++t) {
+    map.add_keyframe(t, map::State{}, sba_imu::IMUPreintegration{}, observations, {});
+    const auto snapshot = map.get_recent_submap(1);
+    const auto& saved = snapshot.landmark_and_obs.back().begin()->observations;
+    ASSERT_EQ(saved.size(), 4u);
+    for (int cam = 0; cam < 4; ++cam) EXPECT_EQ(saved.begin()[cam].cam_id, cam);
+  }
+}
+
+struct UpdateCandidate {
+  float offset;
+  bool solve(sba_imu::ImuBAProblem& p) {
+    p.rig_poses.back().w_from_imu.translation().x() = offset;
+    for (auto& point : p.points) point.z() = 2.f;
+    for (auto& pose : p.rig_poses) pose.velocity.y() = .5f;
+    p.rig_poses.front().preintegration.dT_s = .125f;
+    return true;
+  }
+};
+TEST(ServiceSbaTest, ChecksMapUpdateBeforeWritingAnyState) {
+  for (const float correction : {.3f, .002f}) {
+    auto fixture = MakeSubMap([](TrackId) { return true; });
+    UpdateCandidate solver{correction};
+    const Matrix3T covariance = 1e-5f * Matrix3T::Identity();
+    run_imu_sba(fixture.submap, Vector3T(0,0,-9.81f), camera::Rig{}, imu::ImuCalibration{},
+                sba::Settings{}, solver, covariance);
+    const bool accepted = correction < .01f;
+    const auto& keys = fixture.submap.consecutive_keyframes;
+    EXPECT_FLOAT_EQ(keys.back().keyframe->get_pose().inverse().translation().x(), accepted ? correction : 0.f);
+    EXPECT_FLOAT_EQ(keys.front().keyframe->get_velocity().y(), accepted ? .5f : 0.f);
+    EXPECT_FLOAT_EQ(keys.front().preintegration->dT_s, accepted ? .125f : 0.f);
+    for (const auto& lm : fixture.landmarks)
+      EXPECT_FLOAT_EQ(lm->get_pose()->z(), accepted ? 2.f : 1.f);
+  }
+}
 }  // namespace test

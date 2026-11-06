@@ -16,6 +16,7 @@
  */
 
 #include "imu/soft_inertial_pnp.h"
+#include <array>
 
 #include "common/imu_calibration.h"
 #include "common/log.h"
@@ -93,7 +94,7 @@ void CalcOutliers(const imu::ImuCalibration& imu_calibration, const StereoPnPInp
 
     p_c = cam_from_w[camera_idx] * p_w;
 
-    if (p_c.z() > 1.f) {
+    if (p_c.z() > input.min_depth) {
       r = p_c.topRows(2) / p_c.z() - input.observation_xys[obs];
       float err = r.dot(input.observation_infos[obs] * r);
       is_obs_outlier[obs] = err > thresh;
@@ -150,7 +151,7 @@ float EvaluateCost(const imu::ImuCalibration& imu_calibration, const StereoPnPIn
 
     p_c = input.rig.camera_from_rig[camera_idx] * rig_from_imu * pu2.w_from_imu.inverse() * p_w;
 
-    if (p_c.z() > 1.f) {
+    if (p_c.z() > input.min_depth) {
       r = p_c.topRows(2) / p_c.z() - input.observation_xys[obs];
       cost += ROBUST_COST(r.dot(input.observation_infos[obs] * r), input.robustifier_scale);
     }
@@ -262,7 +263,7 @@ void build_hessian(const imu::ImuCalibration& imu_calibration, const StereoPnPIn
     const Isometry3T& w_from_imu = pose_right.w_from_imu;
     Vector3T p_c = problem.rig.camera_from_rig[camera_idx] * rig_from_imu * w_from_imu.inverse() * p_w;
 
-    if (p_c.z() > 1.f) {
+    if (p_c.z() > problem.min_depth) {
       Vector2T prediction = p_c.topRows(2) / p_c.z();
       Vector2T r = prediction - problem.observation_xys[obs];
 
@@ -296,6 +297,10 @@ void build_hessian(const imu::ImuCalibration& imu_calibration, const StereoPnPIn
   preint.InfoAccRWMatrix(acc_rw_info);
 
   info *= imu_info_penalty;
+  if (problem.shared_bias) {
+    gyro_rw_info.setZero();
+    acc_rw_info.setZero();
+  }
   gyro_rw_info *= imu_info_penalty;
   acc_rw_info *= imu_info_penalty;
 
@@ -364,7 +369,7 @@ void build_hessian(const imu::ImuCalibration& imu_calibration, const StereoPnPIn
       }
 
       {
-        preint.GetDeltaBias(gyro_bias_diff, acc_bias_diff);
+        preint.GetDeltaBias(pose_left.gyro_bias, pose_left.acc_bias, gyro_bias_diff, acc_bias_diff);
         // rot
         Jbg_left.block<3, 3>(0, 0) = -math::twist_left_inverse_jacobian(rot_error) *
                                      math::twist_right_jacobian(preint.JRg * gyro_bias_diff) * preint.JRg;
@@ -669,6 +674,109 @@ void CalcUpdate(const Vec30& step, Pose& left_update, Pose& right_update) {
   right_update.acc_bias = step.segment<3>(27);
 }
 
+// With no absolute right-bias factor the optimum right bias equals the left bias.
+// Eliminate that difference before assembly: its random-walk precision can exceed
+// the common-bias precision by eight orders of magnitude on a 30 Hz interval.
+bool solve_shared_bias(const imu::ImuCalibration& calib, const StereoPnPInput& problem,
+                       const std::vector<bool>& outliers, Pose& left, Pose& right, float penalty) {
+  Matrix9T imu_information;
+  left.preintegration.InfoMatrix(imu_information);
+  if (!imu_information.allFinite() || imu_information.diagonal().minCoeff() <= 0.f) return false;
+  const Pose original_left = left;
+  Pose l = left, r = right;
+  r.gyro_bias = l.gyro_bias;
+  r.acc_bias = l.acc_bias;
+  auto cost = [&](const Pose& a, const Pose& b) {
+    Pose zero;
+    return EvaluateCost(calib, problem, outliers, original_left, a, b, zero, zero, penalty);
+  };
+  auto apply = [](Pose& p, const Pose& update) {
+    p.w_from_imu.translation() += p.w_from_imu.linear() * update.w_from_imu.translation();
+    p.w_from_imu.linear() = (p.w_from_imu.linear() * update.w_from_imu.linear()).eval();
+    p.velocity += update.velocity;
+    p.gyro_bias += update.gyro_bias;
+    p.acc_bias += update.acc_bias;
+  };
+  Eigen::MatrixXd h(24, 24);
+  Eigen::VectorXd rhs(24);
+  auto linearize = [&]() {
+    Mat30 full;
+    Vec30 gradient;
+    build_hessian(calib, problem, outliers, original_left, l, r, penalty, full, gradient);
+    h = full.topLeftCorner<24, 24>().cast<double>();
+    h = (0.5 * (h + h.transpose())).eval();
+    rhs = gradient.head<24>().cast<double>();
+  };
+  double best = cost(l, r);
+  if (!std::isfinite(best)) return false;
+  linearize();
+  double lambda = 1e-4;
+  bool converged = false;
+  for (int i = 0; i < problem.max_iterations; ++i) {
+    const Eigen::VectorXd scale = h.diagonal().cwiseMax(1e-12).cwiseSqrt().cwiseInverse();
+    Eigen::MatrixXd normal = scale.asDiagonal() * h * scale.asDiagonal();
+    normal.diagonal().array() += lambda;
+    Eigen::LDLT<Eigen::MatrixXd> factor(normal);
+    if (factor.info() != Eigen::Success || !factor.isPositive()) {
+      lambda *= 10.;
+      continue;
+    }
+    const Eigen::VectorXd delta = scale.asDiagonal() * factor.solve(scale.asDiagonal() * rhs);
+    if (!delta.allFinite()) return false;
+    Vec30 step = Vec30::Zero();
+    step.head<24>() = delta.cast<float>();
+    step.tail<6>() = step.segment<6>(9);
+    Pose dl, dr, trial_l = l, trial_r = r;
+    CalcUpdate(step, dl, dr);
+    apply(trial_l, dl);
+    apply(trial_r, dr);
+    const double candidate = cost(trial_l, trial_r);
+    if (candidate < best) {
+      best = candidate;
+      l = trial_l;
+      r = trial_r;
+      converged = true;
+      linearize();
+      lambda = std::max(1e-9, lambda * .3);
+    } else if (delta.norm() < 1e-7 && (i == 0 || converged || rhs.norm() < 1e-5)) {
+      converged = true;
+      break;
+    } else {
+      lambda *= 10.;
+    }
+  }
+  if (!converged || !h.allFinite()) return false;
+  // Eliminate old pose and velocity, retain right pose/velocity and common bias.
+  std::array<int, 15> kept{15,16,17,18,19,20,21,22,23,9,10,11,12,13,14};
+  Eigen::MatrixXd cross(9,15), info(15,15);
+  for (int j = 0; j < 15; ++j) {
+    cross.col(j) = h.block(0, kept[j], 9, 1);
+    for (int k = 0; k < 15; ++k) info(k,j) = h(kept[k],kept[j]);
+  }
+  Eigen::LDLT<Eigen::MatrixXd> prior(h.topLeftCorner(9,9));
+  if (prior.info() != Eigen::Success || !prior.isPositive()) return false;
+  info -= cross.transpose() * prior.solve(cross);
+  Matrix3T gyro, acc;
+  l.preintegration.InfoGyroRWMatrix(gyro);
+  l.preintegration.InfoAccRWMatrix(acc);
+  Eigen::MatrixXd bias_info = info.bottomRightCorner(6,6);
+  bias_info.topLeftCorner(3,3) += penalty * gyro.cast<double>();
+  bias_info.bottomRightCorner(3,3) += penalty * acc.cast<double>();
+  Eigen::LDLT<Eigen::MatrixXd> random_walk(bias_info);
+  if (random_walk.info() != Eigen::Success || !random_walk.isPositive()) return false;
+  // Woodbury update for adding the process noise to the retained bias covariance.
+  cross = info.rightCols(6);
+  info -= cross * random_walk.solve(cross.transpose());
+  // build_hessian uses the derivative with respect to squared residuals. A
+  // Gaussian prior is evaluated as 0.5 * e' I e, so the next frame consumes
+  // 0.5 * I. Restore I = 2 * Schur before passing this quadratic forward.
+  r.info = (info + info.transpose()).cast<float>();
+  if (!r.info.allFinite()) return false;
+  left = std::move(l);
+  right = std::move(r);
+  return true;
+}
+
 // OUT: pose, prev_pose - updated poses if success, otherwise it's guaranteed to be unchanged
 bool solve_inertial_pnp(const imu::ImuCalibration& imu_calibration, const StereoPnPInput& problem,
                         const std::vector<bool>& is_obs_outlier,
@@ -691,7 +799,7 @@ bool solve_inertial_pnp(const imu::ImuCalibration& imu_calibration, const Stereo
 
   TraceMessage("PnP: initial_cost=%.2f", initial_cost);
 
-  if (initial_cost < 10.f) {
+  if (problem.cost_shortcut && initial_cost < 10.f) {
     // Nothing to minimize. We have a "pendulum" effect on still frames otherwise.
     prev_pose = original_prev_pose;
     pose = original_pose;
@@ -825,6 +933,10 @@ bool SoftInertialPnP(const imu::ImuCalibration& imu_calibration, const StereoPnP
   is_outlier.resize(problem.observation_xys.size(), false);
   if (!MakeMatrixPositive(prev_pose.info)) {
     return false;
+  }
+  if (problem.shared_bias) {
+    if (problem.freeze_bias || problem.prior_gyro != 0.f || problem.prior_acc != 0.f) return false;
+    return solve_shared_bias(imu_calibration, problem, is_outlier, prev_pose, pose, imu_info_penalty);
   }
   return solve_inertial_pnp(imu_calibration, problem, is_outlier, prev_pose, pose, imu_info_penalty);
 }

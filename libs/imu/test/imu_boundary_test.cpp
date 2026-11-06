@@ -111,3 +111,69 @@ TEST(ImuVelocityTest, PureRotationAtNonzeroPositionHasZeroVelocity) {
 }
 }  // namespace
 }  // namespace cuvslam::sba_imu
+
+#include "imu/soft_inertial_pnp.h"
+
+namespace cuvslam::sba_imu {
+namespace {
+struct StaticRigFrame {
+  imu::ImuCalibration calib{Isometry3T::Identity(), .000174875f, .000004f, .00207896f, .0002f, 200.f};
+  Pose left, right;
+  StereoPnPInput problem;
+  StaticRigFrame() {
+    imu::ImuMeasurementStorage samples(32);
+    for (int n = 0; n <= 8; ++n) {
+      samples.push_back({5000000LL*n, Vector3T::Zero(), Vector3T::Zero()});
+    }
+    left.preintegration = {calib, samples, Vector3T::Zero(), Vector3T::Zero(), 0, 33333333};
+    left.info.setIdentity();
+    left.info *= 1e4f;
+    problem.shared_bias = true;
+    problem.min_depth = .05f;
+    problem.prior_acc = problem.prior_gyro = problem.translation_constraint = 0.f;
+    problem.robustifier_scale_pose = -1.f;
+    problem.gravity.setZero();
+    problem.rig.num_cameras = 4;
+    problem.max_iterations = 20;
+    for (int cam = 0; cam < 4; ++cam) {
+      auto& extrinsic = problem.rig.camera_from_rig[cam];
+      extrinsic = Isometry3T::Identity();
+      extrinsic.translation().x() = .03f * cam;
+      for (int k = 0; k < 12; ++k) {
+        Vector3T xyz((k%4-1.5f)*.12f,(k/4-1.f)*.15f,1.4f+.03f*k);
+        Vector3T pc = extrinsic * xyz;
+        problem.point_ids.push_back(static_cast<int>(problem.points.size()));
+        problem.points.push_back(xyz);
+        problem.camera_ids.push_back(cam);
+        problem.observation_xys.push_back(pc.head<2>() / pc.z());
+        problem.observation_infos.push_back(Matrix2T::Identity()*1e5f);
+      }
+    }
+    left.predict_pose(problem.gravity, left.preintegration, right);
+  }
+};
+
+TEST(JointFourFrameTest, StaticStatePreservesBiasInformation) {
+  StaticRigFrame frame;
+  Matrix9T info;
+  frame.left.preintegration.InfoMatrix(info);
+  ASSERT_GT(info.diagonal().minCoeff(), 0.f);
+  ASSERT_TRUE(SoftInertialPnP(frame.calib, frame.problem, frame.left, frame.right, .001f));
+  EXPECT_LT(frame.right.w_from_imu.translation().norm(), 1e-6f);
+  EXPECT_LT(frame.right.velocity.norm(), 1e-6f);
+  EXPECT_GT(frame.right.info.diagonal().segment<6>(9).minCoeff(), 9900.f);
+}
+
+TEST(JointFourFrameTest, CorrectsPerturbedPrediction) {
+  StaticRigFrame frame;
+  frame.right.w_from_imu.translation().x() += .03f;
+  frame.right.velocity.x() += .25f;
+  ASSERT_TRUE(SoftInertialPnP(frame.calib, frame.problem, frame.left, frame.right, .001f));
+  EXPECT_LT(frame.right.w_from_imu.translation().norm(), .005f);
+  EXPECT_LT(frame.right.velocity.norm(), .05f);
+  EXPECT_TRUE(frame.right.info.allFinite());
+  EXPECT_LT((frame.right.gyro_bias-frame.left.gyro_bias).norm(), 1e-7f);
+  EXPECT_LT((frame.right.acc_bias-frame.left.acc_bias).norm(), 1e-7f);
+}
+}  // namespace
+}  // namespace cuvslam::sba_imu

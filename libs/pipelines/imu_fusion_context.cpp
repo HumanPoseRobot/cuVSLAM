@@ -17,6 +17,12 @@
 
 #include "pipelines/imu_fusion_context.h"
 #include "imu/world_velocity.h"
+#include "imu/soft_inertial_pnp.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <string_view>
 
 #include "common/include_eigen.h"
 #include "common/vector_2t.h"
@@ -63,6 +69,62 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
     return false;
   }
   return true;
+}
+
+// Prior in the solver's body rotation/translation, world velocity, and IMU bias coordinates.
+// Re-seed after visual bootstrap or an external keyframe correction without reusing stale cross terms.
+void seed_joint_prior(sba_imu::Pose& pose) {
+  Vector15T information;
+  information << 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f,
+                 1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f;
+  pose.info = information.asDiagonal();
+}
+
+bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
+                 const std::unordered_map<TrackId, Vector3T>& landmarks,
+                 const std::vector<camera::Observation>& observations, const Vector3T& gravity,
+                 const InertialPnPSettings& settings, sba_imu::Pose left, bool have_prior,
+                 sba_imu::Pose& result, int64_t time_ns) {
+  if (!have_prior) seed_joint_prior(left);
+  sba_imu::Pose right;
+  if (!left.predict_pose(gravity, left.preintegration, right)) return false;
+  const auto prediction = right;
+  sba_imu::StereoPnPInput input;
+  input.rig = rig;
+  input.gravity = gravity;
+  input.robustifier_scale = settings.robustifier_scale;
+  input.robustifier_scale_pose = -1.f;
+  input.max_iterations = settings.max_iteration;
+  input.prior_gyro = input.prior_acc = input.translation_constraint = 0.f;
+  input.imu_penalty = 1e-3f;
+  input.min_depth = 0.05f;
+  input.shared_bias = true;
+  std::array<int, 4> counts{};
+  const Isometry3T rig_from_world = calib.rig_from_imu() * right.w_from_imu.inverse();
+  for (const auto& obs : observations) {
+    const auto it = landmarks.find(obs.id);
+    if (it == landmarks.end() || obs.cam_id >= rig.num_cameras) continue;
+    const Vector3T point = rig.camera_from_rig[obs.cam_id] * rig_from_world * it->second;
+    if (!(point.z() > input.min_depth)) continue;
+    ++counts.at(obs.cam_id);
+    input.point_ids.push_back(static_cast<int>(input.points.size()));
+    input.points.push_back(it->second);
+    input.camera_ids.push_back(obs.cam_id);
+    input.observation_xys.push_back(obs.xy);
+    input.observation_infos.push_back(9.f * obs.xy_info);
+  }
+  const bool enough = settings.min_observations > 0 && settings.max_iteration > 0 &&
+                      input.points.size() >= static_cast<size_t>(settings.min_observations);
+  const bool ok = enough && SoftInertialPnP(calib, input, left, right, input.imu_penalty) &&
+                  right.w_from_imu.matrix().allFinite() && right.velocity.allFinite() &&
+                  right.gyro_bias.allFinite() && right.acc_bias.allFinite() && right.info.allFinite();
+  TraceMessage("JOINT_FRAME t=%lld ok=%d cams=%d,%d,%d,%d dp=%.8f dv=%.8f dbg=%.8f dba=%.8f",
+               static_cast<long long>(time_ns), static_cast<int>(ok), counts[0], counts[1], counts[2], counts[3],
+               (right.w_from_imu.translation() - prediction.w_from_imu.translation()).norm(),
+               (right.velocity - prediction.velocity).norm(), (right.gyro_bias - prediction.gyro_bias).norm(),
+               (right.acc_bias - prediction.acc_bias).norm());
+  if (ok) result = std::move(right);
+  return ok;
 }
 
 // Run the pose-only cuNLS estimator with an IMU-predicted SE3 prior.
@@ -119,6 +181,8 @@ ImuFusionContext::ImuFusionContext(map::UnifiedMap& map, const camera::Rig& rig,
       optimizer_(10),
       init_bundler_(calib),
       sm_() {
+  const char* option = std::getenv("CUVSLAM_JOINT_VI");
+  joint_enabled_ = rig.num_cameras == 4 && option && std::string_view(option) == "1";
   prev_pose_.w_from_imu = calib_.rig_from_imu();
 }
 
@@ -129,6 +193,7 @@ void ImuFusionContext::register_gravity_callback() {
 void ImuFusionContext::reset() {
   imu_storage_.clear();
   sm_.reset();
+  joint_active_ = has_joint_prior_ = false;
   is_first_run_ = true;
   integrated_ = false;
   prev_pose_ts_ns_ = -1;
@@ -176,7 +241,7 @@ ImuFusionContext::FramePrep ImuFusionContext::prepare_frame(int64_t time_ns) {
                                       time_ns);
   };
   last_frame_preint_ = integrate_from(prev_pose_ts_ns_, prev_pose_);
-  last_kf_preint_ = integrate_from(last_kf_ts_ns_, prev_pose_);
+  last_kf_preint_ = integrate_from(last_kf_ts_ns_, joint_active_ ? integ_kf_ : prev_pose_);
   last_valid_pose_.preintegration = integrate_from(last_valid_ts_ns_, last_valid_pose_);
   prev_pose_.preintegration = last_frame_preint_;
   curr_pose_ = prev_pose_;
@@ -198,13 +263,24 @@ ImuFusionContext::FramePrep ImuFusionContext::prepare_frame(int64_t time_ns) {
 bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T>& landmarks,
                                       const std::vector<camera::Observation>& observations,
                                       const pnp::RGBDInfos& depth_infos, const std::vector<map::Plane>& planes,
-                                      const std::vector<Vector3T>& depth_points, int64_t time_ns) {
+                                      const std::vector<Vector3T>& depth_points, int64_t time_ns,
+                                      const InertialPnPSettings& settings, bool interval_healthy) {
   std::optional<Vector3T> maybe_gravity = map_.get_gravity();
   if (!maybe_gravity) {
     return false;
   }
 
   TRACE_EVENT ev = profiler_domain_.trace_event("solve_inertial");
+  joint_active_ = joint_enabled_ && planes.empty() && depth_points.empty() &&
+                  std::none_of(depth_infos.begin(), depth_infos.end(), [](auto p) { return p != nullptr; });
+  if (joint_active_) {
+    has_joint_prior_ = interval_healthy && solve_joint(calib_, rig_, landmarks, observations, *maybe_gravity,
+                                                       settings, prev_pose_, has_joint_prior_, curr_pose_, time_ns);
+    if (has_joint_prior_) return true;
+    TraceMessage("JOINT_VISUAL_FALLBACK t=%lld", static_cast<long long>(time_ns));
+    return solve_visual(landmarks, observations, depth_infos, planes, depth_points, time_ns);
+  }
+  has_joint_prior_ = false;
   // The cuNLS LM uses cunls::SE3BetweenFactorBatch with an IMU-derived Delta; velocity / biases
   // are baked in as constants in the Delta, so the solve does not refine them.  Pose is the only
   // state the LM moves.
@@ -227,6 +303,7 @@ bool ImuFusionContext::solve_visual(const std::unordered_map<TrackId, Vector3T>&
                                     const std::vector<camera::Observation>& observations,
                                     const pnp::RGBDInfos& depth_infos, const std::vector<map::Plane>& planes,
                                     const std::vector<Vector3T>& depth_points, int64_t time_ns) {
+  has_joint_prior_ = false;
   TRACE_EVENT ev = profiler_domain_.trace_event("solve_visual");
   const Isometry3T imu_from_rig = calib_.rig_from_imu().inverse();
   Isometry3T rig_from_world = (prev_pose_.w_from_imu * imu_from_rig).inverse();
@@ -316,8 +393,8 @@ ImuFusionContext::FrameResult ImuFusionContext::finalize_frame(bool pnp_result, 
   }
 
   // Pull SBA-refined biases back into prev_pose so the next frame's PnP starts from the latest
-  // estimate.
-  if (!map_.empty()) {
+  // estimate. A joint posterior already contains its own bias estimate.
+  if (!joint_active_ && !map_.empty()) {
     auto recent_map = map_.get_recent_submap(1);
     if (!recent_map.consecutive_keyframes.empty()) {
       State s = recent_map.consecutive_keyframes.rbegin()->keyframe->get_state();
@@ -342,8 +419,53 @@ map::State ImuFusionContext::build_keyframe_state(const Isometry3T& rig_from_wor
 
 void ImuFusionContext::on_keyframe_committed(bool lost) {
   last_kf_ts_ns_ = prev_pose_ts_ns_;
+  if (joint_active_) integ_kf_ = prev_pose_;
   const sba_imu::Pose& pose = lost ? last_valid_pose_ : prev_pose_;
   last_kf_preint_ = sba_imu::IMUPreintegration(pose.gyro_bias, pose.acc_bias);
+}
+
+std::optional<Matrix3T> ImuFusionContext::joint_position_covariance() const {
+  if (!joint_active_ || !has_joint_prior_) return std::nullopt;
+  Eigen::MatrixXd info = prev_pose_.info.cast<double>();
+  Eigen::LDLT<Eigen::MatrixXd> ldlt(info);
+  if (ldlt.info() != Eigen::Success || ldlt.vectorD().minCoeff() <= 0.) return std::nullopt;
+  Eigen::MatrixXd selector = Eigen::MatrixXd::Zero(15,3);
+  selector.block<3,3>(3,0).setIdentity();
+  Eigen::Matrix3d cov = ldlt.solve(selector).block<3,3>(3,0);
+  const Eigen::Matrix3d rot = prev_pose_.w_from_imu.linear().cast<double>();
+  cov = rot * cov * rot.transpose();
+  if (!cov.allFinite()) return std::nullopt;
+  return cov.cast<float>();
+}
+
+bool ImuFusionContext::read_committed_state(int64_t time_ns, Isometry3T& world_from_rig, Matrix6T& info) {
+  if (!joint_active_ || prev_pose_ts_ns_ != time_ns) return false;
+  const auto recent = map_.get_recent_submap(1);
+  if (recent.consecutive_keyframes.empty()) return false;
+  const auto& key = recent.consecutive_keyframes.back().keyframe;
+  if (key->time_ns() != time_ns) return false;
+  const auto state = key->get_state();
+  const Isometry3T corrected = state.rig_from_w.inverse();
+  const Isometry3T corrected_imu = corrected * calib_.rig_from_imu();
+  if (!corrected.matrix().allFinite() || !state.velocity.allFinite() ||
+      !state.gyro_bias.allFinite() || !state.acc_bias.allFinite()) return false;
+  const float dp = (world_from_rig.translation() - corrected.translation()).norm();
+  const bool changed = !prev_pose_.w_from_imu.matrix().isApprox(corrected_imu.matrix(), 1e-6f) ||
+                       !prev_pose_.velocity.isApprox(state.velocity, 1e-6f) ||
+                       !prev_pose_.gyro_bias.isApprox(state.gyro_bias, 1e-6f) ||
+                       !prev_pose_.acc_bias.isApprox(state.acc_bias, 1e-6f);
+  if (!changed) return false;
+  prev_pose_.w_from_imu = corrected_imu;
+  prev_pose_.velocity = state.velocity;
+  prev_pose_.gyro_bias = state.gyro_bias;
+  prev_pose_.acc_bias = state.acc_bias;
+  seed_joint_prior(prev_pose_);
+  has_joint_prior_ = false;
+  if (last_valid_ts_ns_ == time_ns) last_valid_pose_ = prev_pose_;
+  info = prev_pose_.info.topLeftCorner<6, 6>();
+  world_from_rig = corrected;
+  TraceMessage("JOINT_KEYFRAME t=%lld dp=%.8f", static_cast<long long>(time_ns), dp);
+  return true;
 }
 
 std::optional<Vector3T> ImuFusionContext::get_gravity() const {
