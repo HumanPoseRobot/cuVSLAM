@@ -892,7 +892,9 @@ void Odometry::ApplyPersistentInternalParameters(const std::vector<cuvslam::inte
         "any intermediate values set while SBA is running are overwritten.\n");
   });
 
-  const bool has_sm = (impl->odometry_mode == OdometryMode::Inertial);
+  const bool has_sm =
+      (impl->odometry_mode == OdometryMode::Inertial ||
+       (impl->odometry_mode == OdometryMode::Multisensor && impl->svo_settings.multisensor_settings.with_imu));
 
   sba::Settings& sba = impl->svo_settings.sba_settings;
   pipelines::StateMachineSettings& sm = impl->svo_settings.sm_settings;
@@ -906,6 +908,12 @@ void Odometry::ApplyPersistentInternalParameters(const std::vector<cuvslam::inte
         sba.num_sba_frames = common::ParseInt32(value);
       } else if (key == "sba.num_inertial_sba_frames") {
         sba.num_inertial_sba_frames = common::ParseInt32(value);
+      } else if (key == "sba.num_inertial_fixed_sba_frames") {
+        sba.num_inertial_fixed_sba_frames = common::ParseInt32(value);
+      } else if (key == "sba.num_inertial_sba_iterations") {
+        sba.num_inertial_sba_iterations = common::ParseInt32(value);
+      } else if (key == "sba.inertial_robustifier_scale") {
+        sba.inertial_robustifier_scale = common::ParseFloat(value);
       } else if (key == "sba.num_fixed_sba_frames") {
         sba.num_fixed_sba_frames = common::ParseInt32(value);
       } else if (key == "sba.num_sba_iterations") {

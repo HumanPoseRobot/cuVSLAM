@@ -189,7 +189,7 @@ void run_imu_sba(const UnifiedMap::SubMap& recent_map, const Vector3T& gravity, 
   sba_imu::ImuBAProblem problem;
   problem.rig = rig;
   problem.gravity = gravity;
-  problem.robustifier_scale = 1.5f;
+  problem.robustifier_scale = sba_settings.inertial_robustifier_scale;
   problem.robustifier_scale_pose = -1.0f;
   problem.prior_acc = 0;
   problem.prior_gyro = 0;
@@ -275,7 +275,7 @@ void run_imu_sba(const UnifiedMap::SubMap& recent_map, const Vector3T& gravity, 
     }
   }
 
-  problem.max_iterations = 10;
+  problem.max_iterations = sba_settings.num_inertial_sba_iterations;
   bool res = bundler.solve(problem);
 
   // copy data back only if solver improved cost

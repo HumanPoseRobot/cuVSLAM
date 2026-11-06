@@ -157,8 +157,11 @@ bool MultisensorOdometry::track(const Sources& curr_sources, const DepthSources&
   bool have_pose;
   {
     TRACE_EVENT solve_ev = profiler_domain_.trace_event("solveNextFrame");
+    pipelines::SolverPerFrameSettings solver_settings;
+    solver_settings.sba = per_frame_setting.sba;
+    solver_settings.sm = per_frame_setting.sm;
     have_pose = solver_.solveNextFrame(timestamp, frame_type, observations_, depth_infos_, world_from_rig,
-                                       static_info_exp, tracks2d, tracks3d);
+                                       static_info_exp, solver_settings, tracks2d, tracks3d);
   }
 
   if (stat) {

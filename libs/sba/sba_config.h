@@ -38,6 +38,9 @@ struct Settings {
 
   int32_t num_inertial_fixed_sba_frames = 1;
 
+  int32_t num_inertial_sba_iterations = 10;
+  float inertial_robustifier_scale = 1.5f;
+
   // maximum number of iterations for new SBA
   int32_t num_sba_iterations = 7;
 

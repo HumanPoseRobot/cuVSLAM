@@ -17,6 +17,8 @@
 
 #include "imu/imu_preintegration.h"
 
+#include <algorithm>
+
 #include "common/rotation_utils.h"
 #include "imu/linear_solver.h"
 #include "imu/positive_matrix.h"
@@ -34,8 +36,58 @@ IMUPreintegration::IMUPreintegration(const imu::ImuCalibration& calib, const imu
                                      int64_t end_time_ns) {
   Initialize(gyro_bias, acc_bias);
 
-  storage.iterate_from_to(start_time_ns, end_time_ns,
-                          [&](const imu::ImuMeasurement& m) { IntegrateNewMeasurement(calib, m); });
+  if (end_time_ns <= start_time_ns || storage.empty() || calib.frequency() <= 0.f) {
+    return;
+  }
+  // A future-only sample must never be treated as coverage of an earlier frame.
+  // A causal caller may not have the next sample yet: hold the last measurement
+  // only over the remaining fraction of one nominal sampling period.
+  auto first = storage.begin();
+  auto last = std::prev(storage.end());
+  const double max_tail_ns = 1.5e9 / calib.frequency();
+  if (start_time_ns < first->time_ns || end_time_ns - last->time_ns > max_tail_ns) {
+    return;
+  }
+  auto sample_at = [&](int64_t time_ns) {
+    auto hi = std::lower_bound(storage.begin(), storage.end(), time_ns,
+                               [](const auto& m, int64_t t) { return m.time_ns < t; });
+    if (hi == storage.end()) {
+      auto m = *last;
+      m.time_ns = time_ns;
+      return m;
+    }
+    if (hi->time_ns == time_ns || hi == storage.begin()) {
+      return *hi;
+    }
+    auto lo = std::prev(hi);
+    const float alpha = static_cast<float>(double(time_ns - lo->time_ns) / (hi->time_ns - lo->time_ns));
+    imu::ImuMeasurement m;
+    m.time_ns = time_ns;
+    m.linear_acceleration = (1.f - alpha) * lo->linear_acceleration + alpha * hi->linear_acceleration;
+    m.angular_velocity = (1.f - alpha) * lo->angular_velocity + alpha * hi->angular_velocity;
+    return m;
+  };
+  auto previous = sample_at(start_time_ns);
+  auto append_segment = [&](const imu::ImuMeasurement& current) {
+    const float dt = static_cast<float>((current.time_ns - previous.time_ns) * 1e-9);
+    if (dt <= 0.f) {
+      return;
+    }
+    imu::ImuMeasurement midpoint;
+    midpoint.time_ns = current.time_ns;
+    midpoint.linear_acceleration = 0.5f * (previous.linear_acceleration + current.linear_acceleration);
+    midpoint.angular_velocity = 0.5f * (previous.angular_velocity + current.angular_velocity);
+    measurements_.push_back(midpoint);
+    measurement_durations_s_.push_back(dt);
+    update_state(calib, midpoint, dt);
+    previous = current;
+  };
+  for (auto it = std::upper_bound(storage.begin(), storage.end(), start_time_ns,
+                                  [](int64_t t, const auto&m) { return t < m.time_ns; });
+       it != storage.end() && it->time_ns < end_time_ns; ++it) {
+    append_segment(*it);
+  }
+  append_segment(sample_at(end_time_ns));
 }
 
 void IMUPreintegration::Initialize(const Vector3T& gyro_bias, const Vector3T& acc_bias) {
@@ -99,11 +151,12 @@ void IMUPreintegration::update_state(const imu::ImuCalibration& calib, const imu
   A.block<3, 3>(0, 0) = deltaR.transpose();
   C.block<3, 3>(0, 0) = rightJ * delta_t_s;
 
-  cov_matrix_ =
-      A * cov_matrix_ * A.transpose() + B * calib.acc_noise() * B.transpose() + C * calib.gyro_noise() * C.transpose();
+  const float period_ratio = calib.frequency() * delta_t_s;
+  cov_matrix_ = A * cov_matrix_ * A.transpose() +
+                (B * calib.acc_noise() * B.transpose() + C * calib.gyro_noise() * C.transpose()) / period_ratio;
 
-  acc_random_walk_accum_cov_matrix_ += calib.acc_random_walk();
-  gyro_random_walk_accum_cov_matrix_ += calib.gyro_random_walk();
+  acc_random_walk_accum_cov_matrix_ += calib.acc_random_walk() * period_ratio;
+  gyro_random_walk_accum_cov_matrix_ += calib.gyro_random_walk() * period_ratio;
 
   JRg = deltaR.transpose() * JRg - rightJ * delta_t_s;
   dT_s += delta_t_s;
@@ -121,7 +174,11 @@ void IMUPreintegration::IntegrateNewMeasurement(const imu::ImuCalibration& calib
     delta_t_s = static_cast<float>(m.time_ns - measurements_.back().time_ns) * 1e-9f;
   }
 
+  if (delta_t_s <= 0.f) {
+    return;
+  }
   measurements_.push_back(m);
+  measurement_durations_s_.push_back(delta_t_s);
 
   update_state(calib, m, delta_t_s);
 }
@@ -129,15 +186,8 @@ void IMUPreintegration::IntegrateNewMeasurement(const imu::ImuCalibration& calib
 void IMUPreintegration::Reintegrate(const imu::ImuCalibration& calib) {
   Initialize(gyro_bias_updated_, acc_bias_updated_);
 
-  float delta_t_s = 1.f / calib.frequency();
   for (size_t i = 0; i < measurements_.size(); i++) {
-    const imu::ImuMeasurement& m = measurements_[i];
-    if (i > 0) {
-      const imu::ImuMeasurement& prev_m = measurements_[i - 1];
-      delta_t_s = static_cast<float>(m.time_ns - prev_m.time_ns) * 1e-9f;
-    }
-
-    update_state(calib, m, delta_t_s);
+    update_state(calib, measurements_[i], measurement_durations_s_[i]);
   }
 }
 

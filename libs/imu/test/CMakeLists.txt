@@ -13,6 +13,7 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 set(SOURCES
+        imu_boundary_test.cpp
         imu_pnp_test.cpp
         )
 set(LIBS

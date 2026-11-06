@@ -47,7 +47,11 @@ struct RecordingSbaBundler {
 };
 
 struct RecordingImuBundler {
+  int iterations = -1;
+  float robust_scale = -1;
   bool solve(sba_imu::ImuBAProblem& problem) {
+    iterations = problem.max_iterations;
+    robust_scale = problem.robustifier_scale;
     points = problem.points;
     point_ids = problem.point_ids;
     return true;
@@ -178,4 +182,31 @@ TEST(ServiceSbaTest, ImuSbaToleratesConcurrentTriangulation) {
   }
 }
 
+TEST(ServiceSbaTest, ImuBackendReceivesExplicitSettings) {
+  auto f = MakeSubMap([](TrackId) { return true; });
+  RecordingImuBundler bundler;
+  sba::Settings settings;
+  settings.num_inertial_sba_iterations = 13;
+  settings.inertial_robustifier_scale = .7f;
+  run_imu_sba(f.submap, Vector3T(0, 0, -9.81f), camera::Rig{}, imu::ImuCalibration{}, settings, bundler);
+  EXPECT_EQ(bundler.iterations, 13);
+  EXPECT_FLOAT_EQ(bundler.robust_scale, .7f);
+}
+class RecordingSettingsService : public pipelines::SbaServiceBase {
+public:
+  explicit RecordingSettingsService(UnifiedMap& map) : SbaServiceBase(map, false) {}
+  void service_task() override { observed = current_; }
+  sba::Settings observed;
+};
+TEST(ServiceSbaTest, TriggerSnapshotsLatestSettings) {
+  UnifiedMap map(100);
+  RecordingSettingsService service(map);
+  sba::Settings settings;
+  settings.num_inertial_sba_frames = 20;
+  service.trigger(settings);
+  EXPECT_EQ(service.observed.num_inertial_sba_frames, 20);
+  settings.num_inertial_sba_frames = 12;
+  service.trigger(settings);
+  EXPECT_EQ(service.observed.num_inertial_sba_frames, 12);
+}
 }  // namespace test

@@ -85,6 +85,7 @@ public:
 
 private:
   std::vector<imu::ImuMeasurement> measurements_;
+  std::vector<float> measurement_durations_s_;
 
   void update_state(const imu::ImuCalibration& calib, const imu::ImuMeasurement& m, float delta_t_s);
 

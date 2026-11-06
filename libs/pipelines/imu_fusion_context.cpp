@@ -16,6 +16,7 @@
  */
 
 #include "pipelines/imu_fusion_context.h"
+#include "imu/world_velocity.h"
 
 #include "common/include_eigen.h"
 #include "common/vector_2t.h"
@@ -64,10 +65,9 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
   return true;
 }
 
-// Run the cuNLS MultisensorPoseEstimator with the new IMU preintegration factor. The factor jointly
-// optimizes pose + velocity + biases on the curr side, anchored to the prev state via per-block
-// constants on the prev side. Velocity and biases are returned via InertialPosteriorOutput, so
-// the caller no longer needs to recompute velocity from the visual translation delta.
+// Run the pose-only cuNLS estimator with an IMU-predicted SE3 prior.
+// Velocity and biases are constants in this factor; the caller updates velocity
+// from world-frame position differences after solving the current pose.
 bool run_rgbd_inertial_solve(const pnp::MultisensorPoseEstimator& estimator, const imu::ImuCalibration& calib,
                              const std::unordered_map<TrackId, Vector3T>& landmarks,
                              const std::vector<camera::Observation>& observations, const pnp::RGBDInfos& depth_infos,
@@ -132,6 +132,8 @@ void ImuFusionContext::reset() {
   is_first_run_ = true;
   integrated_ = false;
   prev_pose_ts_ns_ = -1;
+  last_kf_ts_ns_ = -1;
+  last_valid_ts_ns_ = -1;
 
   prev_pose_ = sba_imu::Pose{};
   prev_pose_.w_from_imu = calib_.rig_from_imu();
@@ -148,12 +150,11 @@ void ImuFusionContext::reset() {
 }
 
 void ImuFusionContext::add_measurement(const imu::ImuMeasurement& m) {
+  if (!imu_storage_.empty() && m.time_ns <= imu_storage_.back().time_ns) {
+    TraceWarning("Ignoring non-increasing IMU timestamp");
+    return;
+  }
   imu_storage_.push_back(m);
-
-  last_frame_preint_.IntegrateNewMeasurement(calib_, m);
-  last_valid_pose_.preintegration.IntegrateNewMeasurement(calib_, m);
-  last_kf_preint_.IntegrateNewMeasurement(calib_, m);
-  integ_kf_.preintegration.IntegrateNewMeasurement(calib_, m);
 }
 
 ImuFusionContext::FramePrep ImuFusionContext::prepare_frame(int64_t time_ns) {
@@ -170,6 +171,13 @@ ImuFusionContext::FramePrep ImuFusionContext::prepare_frame(int64_t time_ns) {
     last_kf_preint_ = last_frame_preint_;
   }
 
+  auto integrate_from = [&](int64_t start, const sba_imu::Pose& pose) {
+    return sba_imu::IMUPreintegration(calib_, imu_storage_, pose.gyro_bias, pose.acc_bias, start < 0 ? time_ns : start,
+                                      time_ns);
+  };
+  last_frame_preint_ = integrate_from(prev_pose_ts_ns_, prev_pose_);
+  last_kf_preint_ = integrate_from(last_kf_ts_ns_, prev_pose_);
+  last_valid_pose_.preintegration = integrate_from(last_valid_ts_ns_, last_valid_pose_);
   prev_pose_.preintegration = last_frame_preint_;
   curr_pose_ = prev_pose_;
 
@@ -177,6 +185,13 @@ ImuFusionContext::FramePrep ImuFusionContext::prepare_frame(int64_t time_ns) {
   prep.imu_state = sm_.state();
   prep.predicted_world_from_rig = prev_pose_.w_from_imu * calib_.rig_from_imu().inverse();
   prep.no_drops = check_imu_drops(prev_pose_.preintegration, calib_, prev_pose_ts_ns_, time_ns);
+  if (prev_pose_ts_ns_ >= 0 && time_ns > prev_pose_ts_ns_) {
+    const float expected_dt = static_cast<float>((time_ns - prev_pose_ts_ns_) * 1e-9);
+    prep.no_drops = prep.no_drops && std::abs(last_frame_preint_.dT_s - expected_dt) < 1e-6f;
+    TraceMessage("VIO_FIX_INTERVAL start=%lld end=%lld camera_dt=%.9f integrated_dt=%.9f segments=%zu healthy=%d",
+                 static_cast<long long>(prev_pose_ts_ns_), static_cast<long long>(time_ns), expected_dt,
+                 last_frame_preint_.dT_s, last_frame_preint_.size(), static_cast<int>(prep.no_drops));
+  }
   return prep;
 }
 
@@ -197,10 +212,10 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
                                *maybe_gravity, prev_pose_, curr_pose_)) {
     return false;
   }
-  if (!is_first_run_ && prev_pose_ts_ns_ > 0) {
+  if (!is_first_run_ && prev_pose_ts_ns_ >= 0) {
     float dt = static_cast<float>((time_ns - prev_pose_ts_ns_) * 1e-9);
     if (dt > 1e-6f) {
-      curr_pose_.velocity = (curr_pose_.w_from_imu.translation() - prev_pose_.w_from_imu.translation()) / dt;
+      curr_pose_.velocity = sba_imu::WorldVelocity(prev_pose_.w_from_imu, curr_pose_.w_from_imu, dt);
     }
   } else {
     curr_pose_.velocity.setZero();
@@ -228,11 +243,10 @@ bool ImuFusionContext::solve_visual(const std::unordered_map<TrackId, Vector3T>&
 
   curr_pose_.gyro_bias = prev_pose_.gyro_bias;
   curr_pose_.acc_bias = prev_pose_.acc_bias;
-  if (!is_first_run_ && prev_pose_ts_ns_ > 0) {
+  if (!is_first_run_ && prev_pose_ts_ns_ >= 0) {
     float dt = static_cast<float>((time_ns - prev_pose_ts_ns_) * 1e-9);
     if (dt > 1e-6f) {
-      Vector3T dp = (prev_pose_.w_from_imu * curr_pose_.w_from_imu.inverse()).translation();
-      curr_pose_.velocity = dp / dt;
+      curr_pose_.velocity = sba_imu::WorldVelocity(prev_pose_.w_from_imu, curr_pose_.w_from_imu, dt);
     }
   } else {
     curr_pose_.velocity.setZero();
@@ -260,6 +274,7 @@ ImuFusionContext::FrameResult ImuFusionContext::finalize_frame(bool pnp_result, 
   }
 
   if (pnp_result && imu_state == StateMachine::State::Ok) {
+    last_valid_ts_ns_ = time_ns;
     last_valid_pose_ = curr_pose_;
     last_valid_pose_.preintegration = sba_imu::IMUPreintegration(curr_pose_.gyro_bias, curr_pose_.acc_bias);
   }
@@ -326,6 +341,7 @@ map::State ImuFusionContext::build_keyframe_state(const Isometry3T& rig_from_wor
 }
 
 void ImuFusionContext::on_keyframe_committed(bool lost) {
+  last_kf_ts_ns_ = prev_pose_ts_ns_;
   const sba_imu::Pose& pose = lost ? last_valid_pose_ : prev_pose_;
   last_kf_preint_ = sba_imu::IMUPreintegration(pose.gyro_bias, pose.acc_bias);
 }

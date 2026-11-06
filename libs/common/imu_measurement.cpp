@@ -49,10 +49,6 @@ void ImuMeasurementStorage::iterate_from_to(int64_t from_time_ns, int64_t to_tim
     return lhs.time_ns < rhs.time_ns;
   });
 
-  if (lower_it == upper_it && lower_it != end()) {
-    f(*lower_it);
-  }
-
   for (; lower_it != upper_it; lower_it++) {
     f(*lower_it);
   };

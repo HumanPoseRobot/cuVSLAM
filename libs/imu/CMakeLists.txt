@@ -17,6 +17,7 @@
 set(MODULE_NAME "imu")
 
 set(HEADERS
+    world_velocity.h
     imu_preintegration.h
     imu_sba.h
     imu_sba_problem.h

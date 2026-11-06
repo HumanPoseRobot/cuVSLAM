@@ -109,6 +109,8 @@ SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::R
   imu_->register_gravity_callback();
 }
 
+SolverSfMMultisensor::~SolverSfMMultisensor() = default;
+
 const camera::Rig& SolverSfMMultisensor::getRig() const { return rig_; }
 
 void SolverSfMMultisensor::reset() {
@@ -126,20 +128,22 @@ void SolverSfMMultisensor::reset() {
 bool SolverSfMMultisensor::solveNextFrame(int64_t time_ns, const sof::FrameState& frameState,
                                           const MulticamObservations& observations, const pnp::RGBDInfos& depth_infos,
                                           Isometry3T& world_from_rig, Matrix6T& static_info_exp,
-                                          std::vector<Track2D>* tracks2d, Tracks3DMap* tracks3d) {
+                                          const SolverPerFrameSettings& solver_settings, std::vector<Track2D>* tracks2d,
+                                          Tracks3DMap* tracks3d) {
   if (with_imu_) {
     return solveNextFrameInertial(time_ns, frameState, observations, depth_infos, world_from_rig, static_info_exp,
-                                  tracks2d, tracks3d);
+                                  solver_settings, tracks2d, tracks3d);
   }
   return solveNextFrameVisualOnly(time_ns, frameState, observations, depth_infos, world_from_rig, static_info_exp,
-                                  tracks2d, tracks3d);
+                                  solver_settings, tracks2d, tracks3d);
 }
 
 bool SolverSfMMultisensor::solveNextFrameVisualOnly(int64_t time_ns, const sof::FrameState& frameState,
                                                     const MulticamObservations& observations,
                                                     const pnp::RGBDInfos& depth_infos, Isometry3T& world_from_rig,
-                                                    Matrix6T& static_info_exp, std::vector<Track2D>* tracks2d,
-                                                    Tracks3DMap* tracks3d) {
+                                                    Matrix6T& static_info_exp,
+                                                    const SolverPerFrameSettings& solver_settings,
+                                                    std::vector<Track2D>* tracks2d, Tracks3DMap* tracks3d) {
   TRACE_EVENT ev = profiler_domain_.trace_event("SolverSfMMultisensor::solveNextFrame()", profiler_color_);
 
   flatten_observations(observations, obs_vector_);
@@ -181,7 +185,8 @@ bool SolverSfMMultisensor::solveNextFrameVisualOnly(int64_t time_ns, const sof::
 
   if (frameState == sof::FrameState::Key) {
     map::State state{prev_rig_from_world_};
-    process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, sba_imu::IMUPreintegration{});
+    process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, sba_imu::IMUPreintegration{},
+                     solver_settings.sba);
   }
 
   if (tracks2d && tracks3d) {
@@ -195,8 +200,9 @@ bool SolverSfMMultisensor::solveNextFrameVisualOnly(int64_t time_ns, const sof::
 bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::FrameState& frameState,
                                                   const MulticamObservations& observations,
                                                   const pnp::RGBDInfos& depth_infos, Isometry3T& world_from_rig,
-                                                  Matrix6T& static_info_exp, std::vector<Track2D>* tracks2d,
-                                                  Tracks3DMap* tracks3d) {
+                                                  Matrix6T& static_info_exp,
+                                                  const SolverPerFrameSettings& solver_settings,
+                                                  std::vector<Track2D>* tracks2d, Tracks3DMap* tracks3d) {
   TRACE_EVENT ev = profiler_domain_.trace_event("SolverSfMMultisensor::solveNextFrame(inertial)", profiler_color_);
 
   flatten_observations(observations, obs_vector_);
@@ -217,7 +223,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
     }
   }
 
-  auto frame = imu_->finalize_frame(pnp_result, prep.no_drops, time_ns, frameState, sm_settings_);
+  auto frame = imu_->finalize_frame(pnp_result, prep.no_drops, time_ns, frameState, solver_settings.sm);
   world_from_rig = frame.world_from_rig;
   static_info_exp = frame.static_info_exp;
   prev_rig_from_world_ = world_from_rig.inverse();
@@ -252,7 +258,8 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
 
   if (frameState == sof::FrameState::Key) {
     map::State state = imu_->build_keyframe_state(prev_rig_from_world_, frame.lost);
-    process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, imu_->last_kf_preint());
+    process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, imu_->last_kf_preint(),
+                     solver_settings.sba);
     imu_->on_keyframe_committed(frame.lost);
   }
 
@@ -267,7 +274,8 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
 void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& world_from_rig,
                                             const std::vector<camera::Observation>& obs,
                                             const pnp::RGBDInfos& depth_infos, const map::State& state,
-                                            const sba_imu::IMUPreintegration& preint) {
+                                            const sba_imu::IMUPreintegration& preint,
+                                            const sba::Settings& sba_settings) {
   TRACE_EVENT kf_ev = profiler_domain_.trace_event("keyframe_processing");
 
   std::vector<Landmark> landmarks;
@@ -286,7 +294,10 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
 
   if (sba_service_) {
     TRACE_EVENT sba_ev = profiler_domain_.trace_event("sba_notify");
-    sba_service_->notify();
+    TraceMessage("VIO_FIX_SBA frames=%d fixed=%d iterations=%d robust=%.6f", sba_settings.num_inertial_sba_frames,
+                 sba_settings.num_inertial_fixed_sba_frames, sba_settings.num_inertial_sba_iterations,
+                 sba_settings.inertial_robustifier_scale);
+    sba_service_->trigger(sba_settings);
   }
 }
 

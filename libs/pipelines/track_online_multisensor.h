@@ -40,6 +40,8 @@
 
 namespace cuvslam::pipelines {
 
+class SbaServiceBase;
+
 // Pipeline solver using cuNLS-based MultisensorPoseEstimator for the pose estimation step.
 //
 // The solver supports four rig configurations through one code path:
@@ -58,11 +60,14 @@ public:
   SolverSfMMultisensor(map::UnifiedMap& map, const camera::Rig& rig, const sba::Settings& sba_settings,
                        const cuvslam::imu::ImuCalibration& calib);
 
+  ~SolverSfMMultisensor();
+
   const camera::Rig& getRig() const;
 
   bool solveNextFrame(int64_t time_ns, const sof::FrameState& frameState, const MulticamObservations& observations,
                       const pnp::RGBDInfos& depth_infos, Isometry3T& world_from_rig, Matrix6T& static_info_exp,
-                      std::vector<Track2D>* tracks2d = nullptr, Tracks3DMap* tracks3d = nullptr);
+                      const SolverPerFrameSettings& solver_settings, std::vector<Track2D>* tracks2d = nullptr,
+                      Tracks3DMap* tracks3d = nullptr);
 
   void reset();
 
@@ -82,18 +87,20 @@ public:
 private:
   bool solveNextFrameVisualOnly(int64_t time_ns, const sof::FrameState& frameState,
                                 const MulticamObservations& observations, const pnp::RGBDInfos& depth_infos,
-                                Isometry3T& world_from_rig, Matrix6T& static_info_exp, std::vector<Track2D>* tracks2d,
+                                Isometry3T& world_from_rig, Matrix6T& static_info_exp,
+                                const SolverPerFrameSettings& solver_settings, std::vector<Track2D>* tracks2d,
                                 Tracks3DMap* tracks3d);
 
   bool solveNextFrameInertial(int64_t time_ns, const sof::FrameState& frameState,
                               const MulticamObservations& observations, const pnp::RGBDInfos& depth_infos,
-                              Isometry3T& world_from_rig, Matrix6T& static_info_exp, std::vector<Track2D>* tracks2d,
+                              Isometry3T& world_from_rig, Matrix6T& static_info_exp,
+                              const SolverPerFrameSettings& solver_settings, std::vector<Track2D>* tracks2d,
                               Tracks3DMap* tracks3d);
 
   // Triangulate, lift, push the keyframe to the map, refresh planes, and notify SBA.
   void process_keyframe(int64_t time_ns, const Isometry3T& world_from_rig, const std::vector<camera::Observation>& obs,
                         const pnp::RGBDInfos& depth_infos, const map::State& state,
-                        const sba_imu::IMUPreintegration& preint);
+                        const sba_imu::IMUPreintegration& preint, const sba::Settings& sba_settings);
 
   void exportTracks(const std::vector<camera::Observation>& observations, std::vector<Track2D>& out_tracks2d,
                     Tracks3DMap& out_tracks3d, const Isometry3T& rig_from_world) const;
@@ -101,7 +108,7 @@ private:
   camera::Rig rig_;
   map::UnifiedMap& map_;
 
-  std::unique_ptr<map::ServiceBase> sba_service_;
+  std::unique_ptr<SbaServiceBase> sba_service_;
 
   pnp::MultisensorPoseEstimator pose_estimator_;
   DepthMapsContext depth_maps_;
@@ -113,12 +120,6 @@ private:
   // Inertial path state. Allocated only when constructed with an IMU calibration.
   bool with_imu_ = false;
   std::unique_ptr<ImuFusionContext> imu_;
-
-  // StateMachine settings. The inertial path forwards these to ImuFusionContext::finalize_frame
-  // every frame so that runtime updates from ApplyPersistentInternalParameters take immediate effect. Multisensor
-  // currently uses defaults; full ApplyPersistentInternalParameters wiring (via SolverPerFrameSettings) will be
-  // added when this solver is converted to the ISFMSolver interface.
-  StateMachineSettings sm_settings_;
 
   std::vector<camera::Observation> obs_vector_;
   map::Map<TrackId, Vector3T> recent_landmarks_;

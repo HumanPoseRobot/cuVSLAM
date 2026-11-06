@@ -65,7 +65,7 @@ public:
   // Clears IMU state. Called from SolverSfMMultisensor::reset().
   void reset();
 
-  // Pushes a new IMU measurement and integrates it into all live preintegrations.
+  // Buffers IMU data; camera-boundary preintegration is constructed in prepare_frame().
   void add_measurement(const imu::ImuMeasurement& m);
 
   struct FramePrep {
@@ -147,6 +147,8 @@ private:
   bool is_first_run_ = true;
   bool integrated_ = false;
   int64_t prev_pose_ts_ns_ = -1;
+  int64_t last_kf_ts_ns_ = -1;
+  int64_t last_valid_ts_ns_ = -1;
 
   sba_imu::Pose prev_pose_;        // last accepted rig pose, used as the IMU integration anchor
   sba_imu::Pose curr_pose_;        // working pose for the current frame
