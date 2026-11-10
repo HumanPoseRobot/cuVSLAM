@@ -62,6 +62,10 @@ endif()
 # also gated here because it includes pnp/multisensor_pose_estimator.h for the RGBDInfo struct.
 if(USE_CUNLS)
     enable_language(CUDA)
+    set(SOURCES ${SOURCES} gpu_window/window_backend.cpp gpu_window/window_gpu.cu
+        gpu_window/gpu_joint_adapter.cpp gpu_window/gpu_joint_ad.cu)
+    set(LIBS ${LIBS} cunls::cunls)
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/gpu_window)
     set(HEADERS ${HEADERS} track_online_multisensor.h depth_maps_context.h imu_fusion_context.h track_lifter.h)
     # All host-only sources (no device code); built by the host compiler. track_lifter.cpp is not
     # marked LANGUAGE CUDA — see the note in libs/map/CMakeLists.txt (nvcc cannot parse Eigen's ARM
@@ -90,3 +94,17 @@ setup_staticlib_project(
 )
 
 add_subdirectory(test)
+
+if(USE_CUNLS)
+    add_executable(gpu_window_math_test gpu_window/window_test.cpp)
+    target_link_libraries(gpu_window_math_test PRIVATE pipelines)
+    target_compile_options(gpu_window_math_test PRIVATE -UNDEBUG)
+    add_test(NAME gpu_window_math_test COMMAND gpu_window_math_test)
+endif()
+
+if(USE_CUNLS)
+    add_executable(frontend_guard_test gpu_window/frontend_guard_test.cpp)
+    target_link_libraries(frontend_guard_test PRIVATE pipelines)
+    target_compile_options(frontend_guard_test PRIVATE -UNDEBUG)
+    add_test(NAME frontend_guard_test COMMAND frontend_guard_test)
+endif()

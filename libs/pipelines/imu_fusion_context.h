@@ -18,6 +18,7 @@
 #pragma once
 
 #include <optional>
+#include "pipelines/gpu_window/window_backend.h"
 #include <vector>
 
 #include "camera/observation.h"
@@ -83,7 +84,7 @@ public:
   bool solve_inertial(const std::unordered_map<TrackId, Vector3T>& landmarks,
                       const std::vector<camera::Observation>& observations, const pnp::RGBDInfos& depth_infos,
                       const std::vector<map::Plane>& planes, const std::vector<Vector3T>& depth_points,
-                      int64_t time_ns, const InertialPnPSettings& settings, bool interval_healthy);
+                      int64_t time_ns, const InertialPnPSettings& settings, bool interval_healthy, bool is_keyframe);
 
   // Pure-visual RGBD solve while IMU is still uninitialized. Same data flow, just without the IMU
   // SE3 prior factor.
@@ -118,7 +119,10 @@ public:
 
   std::optional<Vector3T> get_gravity() const;
 
+  bool window_active() const { return window_ && joint_active_ && has_joint_prior_; }
+
   bool has_imu_state() const { return !is_first_run_; }
+  bool allow_map_update() const { return !guard_prediction_only_ && !guard_exhausted_; }
   Vector3T velocity() const { return prev_pose_.velocity; }
   Vector3T gyro_bias() const { return prev_pose_.gyro_bias; }
   Vector3T acc_bias() const { return prev_pose_.acc_bias; }
@@ -147,6 +151,9 @@ private:
   sba_imu::IMUBundlerCpuFixedVel init_bundler_;
   StateMachine sm_;
 
+  std::shared_ptr<sba_imu::WindowBackend> window_;
+  bool guard_prediction_only_ = false, guard_exhausted_ = false, guard_internal_prediction_ = false;
+  double guard_rejected_s_ = 0;
   bool joint_enabled_ = false;
   bool joint_active_ = false;
   bool has_joint_prior_ = false;

@@ -1,3 +1,4 @@
+#include "imu_runtime_options.h"
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -115,9 +116,10 @@ SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::R
     temporal_audit_ = name=="audit" || name=="insert" || name=="strict";
     temporal_insert_ = name=="insert" || name=="strict";
     temporal_strict_ = name=="strict";
-    const char* boot = std::getenv("CUVSLAM_METRIC_INIT");
-    metric_init_enabled_ = temporal_audit_ && boot && std::string_view(boot) == "1";
+
   }
+  metric_init_enabled_ = imu_runtime::MetricEnabled(rig_.num_cameras, sba_settings.async, std::getenv("CUVSLAM_METRIC_INIT"));
+  TraceMessage("VIO_OPTIONS cameras=%d metric=%d temporal=%d", rig_.num_cameras, static_cast<int>(metric_init_enabled_), static_cast<int>(temporal_insert_));
 }
 
 SolverSfMMultisensor::~SolverSfMMultisensor() = default;
@@ -222,6 +224,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   RERUN(logObservations, obs_vector_, rig_, "world/camera_0/images/observations", Color(255, 165, 0));
 
   auto prep = imu_->prepare_frame(time_ns);
+  TraceMessage("VIO_FUSION_STATE t=%lld ready=%d gravity=%d healthy=%d", static_cast<long long>(time_ns), static_cast<int>(prep.imu_state == StateMachine::State::Ok), static_cast<int>(map_.get_gravity().has_value()), static_cast<int>(prep.no_drops));
 
   bool pnp_result = false;
   if (!map_.empty()) {
@@ -229,7 +232,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
 
     if (prep.imu_state == StateMachine::State::Ok) {
       pnp_result = imu_->solve_inertial(recent_landmarks_, obs_vector_, depth_infos, depth_maps_.planes(),
-                                        depth_maps_.depth_points(), time_ns, solver_settings.imu_pnp, prep.no_drops);
+                                        depth_maps_.depth_points(), time_ns, solver_settings.imu_pnp, prep.no_drops, frameState == sof::FrameState::Key);
     } else {
       pnp_result = imu_->solve_visual(recent_landmarks_, obs_vector_, depth_infos, depth_maps_.planes(),
                                       depth_maps_.depth_points(), time_ns);
@@ -277,10 +280,10 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
 
   RERUN(logCameraFrustums, rig_, world_from_rig, "world/frustums");
 
-  if (frameState == sof::FrameState::Key) {
+  if (frameState == sof::FrameState::Key && imu_->allow_map_update()) {
     map::State state = imu_->build_keyframe_state(prev_rig_from_world_, frame.lost);
     process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, imu_->last_kf_preint(),
-                     solver_settings.sba, !just_initialized);
+                     solver_settings.sba, !just_initialized && !imu_->window_active());
     if (!solver_settings.sba.async && sba_service_ && imu_->read_committed_state(time_ns, world_from_rig, static_info_exp)) {
       prev_rig_from_world_ = world_from_rig.inverse();
     }
