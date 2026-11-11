@@ -1,9 +1,93 @@
 #include <cassert>
 #include <iostream>
+#include "window_fp64.h"
 #include "window_linear.h"
 #include "window_math.h"
+#include "window_validation.h"
 using namespace gpu_window;
 int main() {
+  {
+    assert(!float_representable(1e40));
+    assert(!float_representable(std::numeric_limits<double>::infinity()));
+    assert(float_representable(std::numeric_limits<float>::max()));
+    gpu_window::Evaluation bad;
+    bad.prior_j.push_back(std::numeric_limits<float>::quiet_NaN());
+    assert(!valid_evaluation(bad));
+    Problem p;
+    p.count = 2;
+    assert(invalid_problem(p) == nullptr);
+    p.nodes[0].R[0] = -1.;
+    assert(invalid_problem(p) != nullptr);
+    for (bool gpu : {false, true}) {
+      auto r = fp64::Optimize(p, gpu);
+      assert(!valid_result(r, 0));
+    }
+    p.nodes[0] = State{};
+    p.offset[0] = 1e30;
+    for (bool gpu : {false, true}) {
+      auto r = fp64::Optimize(p, gpu);
+      assert(!valid_result(r, 0));
+    }
+    p.offset[0] = 0;
+    p.count = Slots + 1;
+    assert(invalid_problem(p) != nullptr);
+    p.count = 2;
+    Visual v;
+    v.node = -1;
+    p.visuals.push_back(v);
+    assert(invalid_problem(p) != nullptr);
+    for (double angle : {0., 1e-8, 3.14017, 3.14018, 3.141592653589793}) {
+      double x[3] = {angle, 0, 0}, R[9], back[3], reconstructed[9];
+      gpu_vi::exp3(x, R);
+      assert(valid_rotation(R));
+      gpu_vi::log3(R, back);
+      gpu_vi::exp3(back, reconstructed);
+      for (int k = 0; k < 9; ++k) {
+        assert(std::abs(R[k] - reconstructed[k]) < 2e-6);
+      }
+    }
+    std::cout << "Numeric range, invalid rotation/index and rotation boundary tests passed\n";
+  }
+
+  // Log(Exp(x)) must have identity derivative inside the principal branch,
+  // including both sides of the near-pi implementation switch.
+  for (double angle : {0., 1., 3.14017, 3.14018, 3.141592643589793}) {
+    for (int col = 0; col < 3; ++col) {
+      gpu_vi::Jet x[3], R[9], back[3];
+      for (int k = 0; k < 3; ++k) {
+        x[k] = {angle * (k + 1) / std::sqrt(14.), k == col ? 1. : 0.};
+      }
+      gpu_vi::exp3(x, R);
+      gpu_vi::log3(R, back);
+      for (int k = 0; k < 3; ++k) {
+        assert(std::abs(back[k].v - x[k].v) < 1e-10);
+        assert(std::abs(back[k].d - (k == col ? 1. : 0.)) < 1e-6);
+      }
+    }
+  }
+  std::cout << "Near-pi rotation value and Jacobian continuity passed\n";
+  // A purely quadratic velocity prior has an exact model reduction. This
+  // catches a missing diagonal weight or factor of 1/2 in the LM gain ratio.
+  {
+    Problem q;
+    q.count = 2;
+    q.iterations = 20;
+    for (int k = 0; k < 30; ++k) {
+      q.W[k * Dim + k] = (k == 6 ? 100. : 1.);
+    }
+    q.offset[6] = 25.;
+    for (bool gpu : {false, true}) {
+      auto b = gpu ? fp64::MakeGpu(q) : fp64::MakeCpu(q);
+      std::vector<double> x(30);
+      double initial = b->Evaluate(x, true);
+      auto step = b->Solve(1e-3);
+      assert(step.valid);
+      assert(std::abs(step.dx[6] + .25 / 1.001) < 1e-12);
+      double trial = b->Evaluate(step.dx, false);
+      assert(std::abs(step.predicted - (initial - trial)) < 1e-10);
+    }
+    std::cout << "FP64 quadratic predicted reduction and zero-landmark solve passed\n";
+  }
   Problem p;
   p.count = 6;
   p.iterations = 20;
@@ -148,6 +232,25 @@ int main() {
     }
   }
   auto sol = Optimize(p);
+  auto cpu64_backend = fp64::MakeCpu(p);
+  auto gpu64_backend = fp64::MakeGpu(p);
+  std::vector<double> initial64(15 * p.count + 3 * p.points.size());
+  const double cpu_cost = cpu64_backend->Evaluate(initial64, true);
+  const double gpu_cost = gpu64_backend->Evaluate(initial64, true);
+  assert(std::abs(cpu_cost - gpu_cost) < 1e-9 * std::max(1., cpu_cost));
+  auto cpu_step = cpu64_backend->Solve(1e-3);
+  auto gpu_step = gpu64_backend->Solve(1e-3);
+  assert(cpu_step.valid && gpu_step.valid);
+  for (size_t i = 0; i < cpu_step.dx.size(); ++i) {
+    assert(std::abs(cpu_step.dx[i] - gpu_step.dx[i]) < 1e-7);
+  }
+  auto cpu64 = fp64::Minimize(p, *cpu64_backend);
+  auto gpu64 = fp64::Minimize(p, *gpu64_backend);
+  assert(std::abs(cpu64.after - gpu64.after) < 1e-8 * std::max(1., cpu64.after));
+  for (size_t i = 0; i < cpu64.x.size(); ++i) {
+    assert(std::abs(cpu64.x[i] - gpu64.x[i]) < 1e-6);
+  }
+  std::cout << "FP64 CPU/GPU normal solve and shared LM agree, residual=" << gpu_step.relative_residual << "\n";
   auto schur = OptimizeSchur(p);
   auto cpu = OptimizeCpu(p);
   assert(std::abs(schur.before - cpu.before) <= 1e-5 * std::max(1.f, cpu.before));

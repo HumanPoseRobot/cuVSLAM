@@ -53,9 +53,15 @@ HD inline void log3(const T* r, T* x) {
     int i = r[0] < r[4] ? 1 : 0;
     i = r[i * 4] < r[8] ? 2 : i;
     T axis[3] = {0, 0, 0};
-    axis[i] = sqrt((r[4 * i] + 1) / 2);
+    // Rodrigues: R_ii = cos(theta) + (1-cos(theta))*axis_i^2.
+    // The former (R_ii+1)/2 approximation is exact only at pi and creates
+    // a value/Jacobian discontinuity at the near-pi branch boundary.
+    const T one_minus_cos = 1 - cs;
+    axis[i] = sqrt((r[4 * i] - cs) / one_minus_cos);
     for (int j = 0; j < 3; ++j) {
-      if (j != i) axis[j] = (r[3 * i + j] + r[3 * j + i]) / (4 * axis[i]);
+      if (j != i) {
+        axis[j] = (r[3 * i + j] + r[3 * j + i]) / (2 * one_minus_cos * axis[i]);
+      }
     }
     T dot = axis[0] * y[0] + axis[1] * y[1] + axis[2] * y[2];
     if (dot < 0) {

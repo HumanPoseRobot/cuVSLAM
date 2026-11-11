@@ -287,7 +287,10 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
     if (!solver_settings.sba.async && sba_service_ && imu_->read_committed_state(time_ns, world_from_rig, static_info_exp)) {
       prev_rig_from_world_ = world_from_rig.inverse();
     }
-    imu_->on_keyframe_committed(frame.lost);
+    if (!imu_->on_keyframe_committed(frame.lost)) {
+      temporal_.clear();
+      return false;
+    }
     temporal_.clear();
   }
   if (temporal_ready_) temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,12u);

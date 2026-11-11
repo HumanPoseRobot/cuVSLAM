@@ -203,6 +203,7 @@ Result OptimizeCpu(const Problem& p) {
     }
     const auto recover_start = Clock::now();
     double step = dx.squaredNorm();
+    double damped_step = dx.dot(system.h.diagonal().array().max(1e-12).matrix().cwiseProduct(dx));
     double predicted = dx.dot(system.h * dx);
     for (size_t i = 0; i < system.landmarks.size(); ++i) {
       const auto& point = system.landmarks[i];
@@ -210,13 +211,14 @@ Result OptimizeCpu(const Problem& p) {
       const Eigen::Vector3d dp = point.factor.solve(-point.g - cross);
       predicted += dp.dot(point.h * dp + 2 * cross);
       step += dp.squaredNorm();
+      damped_step += dp.dot(point.h.diagonal().array().max(1e-12).matrix().cwiseProduct(dp));
       for (int j = 0; j < 3; ++j) {
         trial.points[3 * i + j] += dp[j];
       }
     }
     result.landmark_ms += std::chrono::duration<double, std::milli>(Clock::now() - recover_start).count();
     const double updated = cost(EvaluateHost(p, trial, false), p.huber);
-    const double relative = (predicted + 2 * lambda * step) / current;
+    const double relative = (predicted + 2 * lambda * damped_step) / current;
     const bool converged = step < 1e-10 || relative < 1e-6 || updated < 1e-7;
     const double rho = (1. - updated / current) / relative;
     if ((converged && updated <= current) || (!converged && rho >= .25)) {

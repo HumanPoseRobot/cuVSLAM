@@ -1,5 +1,6 @@
 #include <chrono>
 #include "gpu_joint_adapter.h"
+#include "gpu_bias_rw_adapter.h"
 #include "pipelines/gpu_window/frontend_guard_adapter.h"
 
 /*
@@ -20,6 +21,7 @@
 
 #include "pipelines/imu_fusion_context.h"
 #include "imu_runtime_options.h"
+#include "imu_initialization_validation.h"
 #include "imu/world_velocity.h"
 #include "imu/soft_inertial_pnp.h"
 
@@ -173,7 +175,7 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
   input.prior_gyro = input.prior_acc = input.translation_constraint = 0.f;
   input.imu_penalty = 1e-3f;
   input.min_depth = 0.05f;
-  input.shared_bias = true;
+  input.shared_bias = false;
   std::array<int, 4> counts{};
   const Isometry3T rig_from_world = calib.rig_from_imu() * right.w_from_imu.inverse();
   for (const auto& obs : observations) {
@@ -194,7 +196,7 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
                       input.points.size() >= static_cast<size_t>(settings.min_observations);
   static size_t audit_frame = 0;
   bool audit_ok = true;
-  if (enough && (audit_frame++ % 60 == 0)) {
+  if (input.shared_bias && enough && (audit_frame++ % 60 == 0)) {
     try {
       sba_imu::AuditGpuJoint(calib, input, left, right, input.imu_penalty);
     } catch (const std::runtime_error& error) {
@@ -212,7 +214,7 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
   auto gpu_left = left, gpu_right = right;
   bool gpu_ok = false;
   if (enough && (gpu_mode || gpu_shadow)) {
-    gpu_ok = sba_imu::SolveGpuJoint(calib, input, gpu_left, gpu_right, input.imu_penalty);
+    gpu_ok = sba_imu::SolveGpuBiasRW(calib, input, gpu_left, gpu_right, input.imu_penalty);
   }
   bool solved = false;
   if (gpu_mode) {
@@ -267,7 +269,7 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
       if (subset.points.size()>=20) {
         auto retry_left=original_left;
         const bool solved_refine=gpu_mode
-            ? sba_imu::SolveGpuJoint(calib,subset,retry_left,retry_right,1e-3f)
+            ? sba_imu::SolveGpuBiasRW(calib,subset,retry_left,retry_right,1e-3f)
             : SoftInertialPnP(calib,subset,retry_left,retry_right,1e-3f);
         const int improved=solved_refine ? support(retry_right,nullptr) : 0;
         const bool accepted=improved>=old_support+5 &&
@@ -320,7 +322,7 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
         const auto limits=frontend_guard::correction_limits(original_left.preintegration.dT_s);
         for(int group=0;group<3;++group) retry_left.info.block<3,3>(6+3*group,6+3*group).diagonal().array() += float(16./(limits[group]*limits[group]));
         const bool solved_retry = gpu_mode
-            ? sba_imu::SolveGpuJoint(calib,recovery_input,retry_left,retry_right,penalty)
+            ? sba_imu::SolveGpuBiasRW(calib,recovery_input,retry_left,retry_right,penalty)
             : SoftInertialPnP(calib,recovery_input,retry_left,retry_right,penalty);
         bool accepted_retry = solved_retry && frontend_guard::validate(calib,rig,landmarks,observations,prediction,retry_right,settings.min_observations,original_left.preintegration.dT_s,time_ns,"recovery");
         if(!accepted_retry&&solved_retry){
@@ -439,7 +441,7 @@ void ImuFusionContext::reset() {
   guard_prediction_only_ = guard_exhausted_ = guard_internal_prediction_ = false; guard_rejected_s_ = 0;
   is_first_run_ = true;
   integrated_ = false;
-  prev_pose_ts_ns_ = -1;
+  prev_pose_ts_ns_ = prepared_previous_ts_ns_ = -1;
   last_kf_ts_ns_ = -1;
   last_valid_ts_ns_ = -1;
 
@@ -466,6 +468,7 @@ void ImuFusionContext::add_measurement(const imu::ImuMeasurement& m) {
 }
 
 ImuFusionContext::FramePrep ImuFusionContext::prepare_frame(int64_t time_ns) {
+  prepared_previous_ts_ns_=prev_pose_ts_ns_;
   guard_prediction_only_ = guard_exhausted_ = guard_internal_prediction_ = false;
   if (is_first_run_) {
     Vector15T diag = Vector15T::Zero();
@@ -691,6 +694,23 @@ ImuFusionContext::FrameResult ImuFusionContext::finalize_frame(bool pnp_result, 
     if (guard_exhausted_ && guard_internal_prediction_) prev_pose_ = curr_pose_;
   }
 
+  // Diagnostic only: no correction or endpoint constraint is introduced.
+  // Record the state actually carried into the next frame, not a rejected trial.
+  if (joint_active_) {
+    const auto g=map_.get_gravity();
+    const auto& p=prev_pose_.w_from_imu.translation();
+    const auto& v=prev_pose_.velocity;
+    const auto& bg=prev_pose_.gyro_bias;
+    const auto& ba=prev_pose_.acc_bias;
+    if (g) {
+      const Vector3T up=-g->normalized();
+      TraceMessage("VIO_STATE_AUDIT t=%lld valid=%d p=%.9g,%.9g,%.9g v=%.9g,%.9g,%.9g "
+                   "bg=%.9g,%.9g,%.9g ba=%.9g,%.9g,%.9g g=%.9g,%.9g,%.9g vz=%.9g",
+                   (long long)time_ns,int(result.valid_pose),p.x(),p.y(),p.z(),v.x(),v.y(),v.z(),
+                   bg.x(),bg.y(),bg.z(),ba.x(),ba.y(),ba.z(),g->x(),g->y(),g->z(),v.dot(up));
+    }
+  }
+
   // Pull SBA-refined biases back into prev_pose so the next frame's PnP starts from the latest
   // estimate. A joint posterior already contains its own bias estimate.
   if (!joint_active_ && !map_.empty()) {
@@ -716,12 +736,36 @@ map::State ImuFusionContext::build_keyframe_state(const Isometry3T& rig_from_wor
   return map::State{rig_from_world, pose.velocity, pose.acc_bias, pose.gyro_bias};
 }
 
-void ImuFusionContext::on_keyframe_committed(bool lost) {
-  if (window_ && !lost && has_joint_prior_) { window_->commit(map_, calib_, prev_pose_ts_ns_); }
+bool ImuFusionContext::on_keyframe_committed(bool lost) {
+  if (window_ && !lost && has_joint_prior_ && !window_->commit(map_, calib_, prev_pose_ts_ns_)) {
+    // Fail closed: a pose whose map transaction failed is not a valid output.
+    window_->reset();has_joint_prior_=false;guard_exhausted_=true;
+    TraceMessage("FRONTEND_COMMIT_FAILED t=%lld publish=0",(long long)prev_pose_ts_ns_);
+    return false;
+  }
+  if(joint_active_ && !lost) {
+    const auto recent=map_.get_recent_submap(1);
+    if(recent.consecutive_keyframes.empty() || recent.consecutive_keyframes.back().keyframe->time_ns()!=prev_pose_ts_ns_) {
+      TraceMessage("FRONTEND_COMMIT_FAILED t=%lld reason=missing_current publish=0",(long long)prev_pose_ts_ns_);
+      return false;
+    }
+    const auto state=recent.consecutive_keyframes.back().keyframe->get_state();
+    const auto imu_pose=state.rig_from_w.inverse()*calib_.rig_from_imu();
+    const double dp=(imu_pose.translation()-prev_pose_.w_from_imu.translation()).norm();
+    const double dv=(state.velocity-prev_pose_.velocity).norm();
+    const double dbg=(state.gyro_bias-prev_pose_.gyro_bias).norm(),dba=(state.acc_bias-prev_pose_.acc_bias).norm();
+    if(dp>1e-4 || dv>1e-4 || dbg>1e-4 || dba>1e-4 ||
+       !imu_pose.matrix().isApprox(prev_pose_.w_from_imu.matrix(),1e-4f)) {
+      TraceMessage("FRONTEND_COMMIT_FAILED t=%lld reason=state_mismatch publish=0",(long long)prev_pose_ts_ns_);
+      return false;
+    }
+    TraceMessage("VIO_COMMIT_CONSISTENT t=%lld dp=%.9g dv=%.9g dbg=%.9g dba=%.9g",(long long)prev_pose_ts_ns_,dp,dv,dbg,dba);
+  }
   last_kf_ts_ns_ = prev_pose_ts_ns_;
   if (joint_active_) integ_kf_ = prev_pose_;
   const sba_imu::Pose& pose = lost ? last_valid_pose_ : prev_pose_;
   last_kf_preint_ = sba_imu::IMUPreintegration(pose.gyro_bias, pose.acc_bias);
+  return true;
 }
 
 std::optional<Matrix3T> ImuFusionContext::joint_position_covariance() const {
@@ -778,20 +822,6 @@ std::optional<Vector3T> ImuFusionContext::get_gravity() const {
   return rig_from_w.linear() * (*gravity);
 }
 
-void ImuFusionContext::snap_to_keyframe_pose(const sba_imu::Pose& last_kf_pose) {
-  auto apply = [&](sba_imu::Pose& pose) {
-    pose.velocity = last_kf_pose.velocity;
-    pose.gyro_bias = last_kf_pose.gyro_bias;
-    pose.acc_bias = last_kf_pose.acc_bias;
-    pose.preintegration.SetNewBias(last_kf_pose.gyro_bias, last_kf_pose.acc_bias);
-    pose.preintegration.Reintegrate(calib_);
-  };
-  apply(curr_pose_);
-  apply(prev_pose_);
-  apply(integ_kf_);
-  apply(last_valid_pose_);
-}
-
 bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
   TRACE_EVENT ev = profiler_domain_.trace_event("gravity_estimation_callback");
   auto recent_map = map_.get_recent_submap(map_.capacity());
@@ -810,6 +840,15 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
                              kf.preintegration ? *kf.preintegration : sba_imu::IMUPreintegration()});
   }
 
+  // Reject missing or misassigned keyframe intervals before estimating gravity.
+  for (size_t i=0;i+1<gravity_cache.size();++i) {
+    const auto left=recent_map.consecutive_keyframes[i].keyframe->time_ns();
+    const auto right=recent_map.consecutive_keyframes[i+1].keyframe->time_ns();
+    if (!ValidInitInterval(left,right,gravity_cache[i].preintegration.dT_s)) {
+      TraceMessage("VIO_INIT_REJECT stage=interval index=%zu",i);
+      return false;
+    }
+  }
   std::vector<std::vector<camera::Observation>> observations_per_kf;
   observations_per_kf.reserve(recent_map.consecutive_keyframes.size());
   for (const auto& lm_obs : recent_map.landmark_and_obs) {
@@ -834,6 +873,10 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
     return false;
   }
 
+  if (!ValidInitCandidate(gravity_cache,Rgravity)) {
+    TraceMessage("VIO_INIT_REJECT stage=candidate_finite_rotation");
+    return false;
+  }
   TRACE_EVENT ev1 = profiler_domain_.trace_event("update map");
   const Vector3T gravity_for_sba = Rgravity * optimizer_.get_default_gravity();
 
@@ -856,24 +899,33 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
     id++;
   }
 
-  // Snap live tracking state to the last keyframe pose (closest temporal match for the next
-  // tracking frame).
-  snap_to_keyframe_pose(gravity_cache.back());
-  if (metric_bootstrap_) {
-    // The gravity initializer estimates velocity at the last committed keyframe.
-    // Propagate that velocity to the image being finalized without moving its visual pose.
-    const auto& anchor = gravity_cache.back();
-    const int64_t anchor_ns = recent_map.consecutive_keyframes.back().keyframe->time_ns();
-    sba_imu::IMUPreintegration interval(calib_, imu_storage_, anchor.gyro_bias, anchor.acc_bias,
-                                       anchor_ns, prev_pose_ts_ns_);
-    sba_imu::Pose prediction;
-    const double dt = (prev_pose_ts_ns_ - anchor_ns) * 1e-9;
-    if (dt > 0 && std::abs(interval.dT_s-dt)<1e-5 &&
-        anchor.predict_pose(gravity_for_sba, interval, prediction) && prediction.velocity.allFinite())
-      curr_pose_.velocity = prediction.velocity;
-    TraceMessage("CAM01_METRIC_INIT t=%lld anchor=%lld dt=%.6f",static_cast<long long>(prev_pose_ts_ns_),
-                 static_cast<long long>(anchor_ns), interval.dT_s);
-  }
+  // Bias estimates share sensor coordinates, but velocities belong to distinct
+  // times. Never copy the last keyframe velocity into every live frame.
+  const auto& anchor=gravity_cache.back();
+  const int64_t anchor_ns=recent_map.consecutive_keyframes.back().keyframe->time_ns();
+  auto synchronize=[&](sba_imu::Pose& pose,int64_t stamp) {
+    pose.gyro_bias=anchor.gyro_bias;pose.acc_bias=anchor.acc_bias;
+    if(stamp==anchor_ns) {pose.velocity=anchor.velocity;}
+    else if(stamp>anchor_ns) {
+      sba_imu::IMUPreintegration pi(calib_,imu_storage_,anchor.gyro_bias,anchor.acc_bias,anchor_ns,stamp);
+      Vector3T velocity;
+      if(InitVelocityAt(anchor,pi,anchor_ns,stamp,gravity_for_sba,velocity)) {
+        pose.velocity=velocity;
+      }
+    }
+    pose.preintegration.SetNewBias(anchor.gyro_bias,anchor.acc_bias);
+    pose.preintegration.Reintegrate(calib_);
+    seed_joint_prior(pose);
+  };
+  synchronize(curr_pose_,prev_pose_ts_ns_);
+  synchronize(prev_pose_,prepared_previous_ts_ns_);
+  synchronize(last_valid_pose_,last_valid_ts_ns_);
+  synchronize(integ_kf_,last_kf_ts_ns_);
+  // The old Hessian/linearization is incompatible with the new bias/gravity.
+  has_joint_prior_=false;
+  if(window_) {window_->reset();}
+  TraceMessage("VIO_INIT_STATE_SYNC current=%lld previous=%lld anchor=%lld",(long long)prev_pose_ts_ns_,
+               (long long)prepared_previous_ts_ns_,(long long)anchor_ns);
 
   TraceMessage("VIO_INIT_SUCCESS gravity_norm=%.7f metric=%d", gravity_for_sba.norm(), static_cast<int>(metric_bootstrap_));
   map_.set_gravity(gravity_for_sba);

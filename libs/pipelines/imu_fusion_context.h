@@ -111,8 +111,9 @@ public:
   // Returns the preintegration to attach to the keyframe that is being committed.
   const sba_imu::IMUPreintegration& last_kf_preint() const { return last_kf_preint_; }
 
-  // Resets last_kf_preint_ to a fresh preintegration starting from the current bias estimate.
-  void on_keyframe_committed(bool lost);
+  // Commit the validated window/map transaction; false forbids publishing this frame.
+  // On success, reset keyframe integration using the committed bias estimate.
+  bool on_keyframe_committed(bool lost);
 
   std::optional<Matrix3T> joint_position_covariance() const;
   bool read_committed_state(int64_t time_ns, Isometry3T& world_from_rig, Matrix6T& info);
@@ -137,10 +138,6 @@ private:
   // Body of the gravity-estimation callback registered with imu_sm_.
   bool gravity_estimation_callback(size_t num_kfs);
 
-  // Convenience: snapshot bias/velocity from the most recent keyframe state to all live poses and
-  // re-integrate their preintegrations. Mirrors the post-gravity-init bookkeeping.
-  void snap_to_keyframe_pose(const sba_imu::Pose& last_kf_pose);
-
   map::UnifiedMap& map_;
   const camera::Rig& rig_;
   imu::ImuCalibration calib_;
@@ -162,6 +159,7 @@ private:
   bool is_first_run_ = true;
   bool integrated_ = false;
   int64_t prev_pose_ts_ns_ = -1;
+  int64_t prepared_previous_ts_ns_ = -1;
   int64_t last_kf_ts_ns_ = -1;
   int64_t last_valid_ts_ns_ = -1;
 

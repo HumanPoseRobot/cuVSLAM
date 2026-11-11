@@ -605,10 +605,11 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
   Vector3T acc_bias = Vector3T::Zero();
   bool linear_ok = LinearAlignment(poses, gyro_bias, Rgravity, acc_bias);
   if (!linear_ok) {
-    // Fall back to average-acc gravity estimate if linear system fails
-    TraceWarning("LinearAlignment failed, falling back to average-acc gravity estimate");
-    Rgravity = SolveGravityDirection(poses, default_gravity);
-    acc_bias = Vector3T::Zero();
+    // A failed metric alignment is not an initialized inertial state. Averaging
+    // accelerations during motion confounds gravity with body acceleration.
+    // The caller keeps visual tracking and retries with more keyframes.
+    TraceMessage("INERTIAL_INIT_REJECT reason=linear_alignment");
+    return false;
   }
   RefineGravity(poses, gyro_bias, Rgravity, acc_bias);
 
@@ -620,6 +621,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
   negative_gradient.setZero(3 * num_poses + 8);
 
   auto initial_cost = calc_cost_with_update(poses, Rgravity, gyro_bias, acc_bias, negative_gradient, robustifier);
+  if (!std::isfinite(initial_cost)) { return false; }
   if (initial_cost < 1e-5) {
     for (Pose& p : poses) {
       p.gyro_bias = gyro_bias;
@@ -644,7 +646,12 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
 
     TRACE_EVENT ev2 = profiler_domain_.trace_event("solve");
     Eigen::LDLT<Eigen::MatrixXf, Eigen::Lower> decomposition(augmented_system);
+    if (decomposition.info() != Eigen::Success || !decomposition.isPositive()) {
+      TraceMessage("INERTIAL_INIT_REJECT reason=lm_factorization");
+      return false;
+    }
     Eigen::VectorXf step = decomposition.solve(-negative_gradient);
+    if (!step.allFinite()) { return false; }
     ev2.Pop();
 
     auto cost = calc_cost_with_update(poses, Rgravity, gyro_bias, acc_bias, step, robustifier);
@@ -661,6 +668,10 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
       break;
     }
 
+    if (!std::isfinite(cost) || !std::isfinite(predicted_relative_reduction) || predicted_relative_reduction <= 0.f) {
+      lambda *= 5.f;
+      continue;
+    }
     auto rho = (1.f - cost / current_cost) / predicted_relative_reduction;
 
     // we have achieved sufficient decrease

@@ -26,7 +26,7 @@ public:
    std::function<bool(const Pose&,const std::map<TrackId,Vector3T>&)> accept_candidate;
  };
  bool solve(const FrameInput&,Pose&);
- void commit(map::UnifiedMap&,const imu::ImuCalibration&,int64_t);
+ bool commit(map::UnifiedMap&,const imu::ImuCalibration&,int64_t);
  void reset();
  void discard_pending();
 private:
