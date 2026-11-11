@@ -1,3 +1,6 @@
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include "window_backend.h"
 #include "window_math.h"
 #include "window_linear.h"
@@ -9,12 +12,115 @@ using WMatrix=Eigen::MatrixXd;using WVector=Eigen::VectorXd;using WinProblem=gpu
 using gpu_window::project_out;using gpu_window::compress_prior;using gpu_window::position_consistent;using gpu_window::Slots;using gpu_window::Dim;using gpu_window::square_root;using gpu_window::pinverse;using gpu_window::Optimize;using gpu_window::Evaluate;using gpu_window::assemble;using gpu_window::eliminate_first;
 namespace {
 using namespace gpu_window;
+using Clock = std::chrono::steady_clock;
+double elapsed(Clock::time_point start) {
+  return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+}
+int window_limit() {
+  const char* value = std::getenv("CUVSLAM_WINDOW_SIZE");
+  if (value && std::strcmp(value, "3") == 0) { return 3; }
+  if (value && std::strcmp(value, "4") == 0) { return 4; }
+  return Slots;
+}
+bool cpu_window() {
+  const char* value = std::getenv("CUVSLAM_WINDOW_SOLVER");
+  return value && std::strcmp(value, "cpu") == 0;
+}
+bool schur_window() {
+  const char* value = std::getenv("CUVSLAM_WINDOW_SOLVER");
+  return value && std::strcmp(value, "schur") == 0;
+}
+WinEvaluation evaluate_window(const WinProblem& p, const WinResult& r) {
+  return cpu_window() ? EvaluateCpu(p, r) : Evaluate(p, r);
+}
 template<class M>void copy_matrix(double* p,const M&m){for(int i=0;i<m.rows();++i){for(int j=0;j<m.cols();++j){p[i*m.cols()+j]=m(i,j);}}}
 gpu_window::State pack_state(const Pose&p){gpu_window::State s;copy_matrix(s.R,p.w_from_imu.linear());copy_matrix(s.p,p.w_from_imu.translation());copy_matrix(s.v,p.velocity);copy_matrix(s.bg,p.gyro_bias);copy_matrix(s.ba,p.acc_bias);return s;}
 void update_pose(Pose&p,const float*x){auto a=pack_state(p);double z[15];for(int k=0;k<15;++k){z[k]=x[k];}double R[9],t[3],v[3];gpu_window::pose(a,z,R,t,v);for(int i=0;i<3;++i){p.w_from_imu.translation()[i]=t[i];p.velocity[i]=v[i];p.gyro_bias[i]+=z[9+i];p.acc_bias[i]+=z[12+i];for(int j=0;j<3;++j){p.w_from_imu.linear()(i,j)=R[3*i+j];}}}
 template<int N>void whiten(double* dst,const Eigen::Matrix<double,N,N>&m){WMatrix W;WVector c;square_root(m,WVector::Zero(N),W,c);copy_matrix(dst,W);}
 struct Node {int64_t t;Pose pose;std::vector<camera::Observation> observations;};
 struct Graph {std::vector<Node> nodes;std::map<TrackId,Vector3T>points;std::array<gpu_window::State,Slots>anchors{};WMatrix W=WMatrix::Zero(Dim,Dim);WVector c=WVector::Zero(Dim);};
+struct MapSupport {
+  int before = 0;
+  int after = 0;
+
+  bool preserved() const {
+    // Allow reprojections near the inlier threshold to change classification.
+    return before < 20 || after >= before - std::max(2, before / 20);
+  }
+};
+
+bool reprojection_inlier(const camera::Rig& rig, const Isometry3T& rig_from_world,
+                         const camera::Observation& observation, const Vector3T& point) {
+  if (observation.cam_id >= rig.num_cameras) {
+    return false;
+  }
+  const auto camera = observation.cam_id;
+  const Vector3T pc = rig.camera_from_rig[camera] * rig_from_world * point;
+  if (!pc.allFinite() || pc.z() <= .05f) {
+    return false;
+  }
+  const Vector2T error = pc.hnormalized() - observation.xy;
+  return error.dot(9.f * observation.xy_info * error) <= 9.21f &&
+         error.cwiseProduct(rig.intrinsics[camera]->getFocal()).squaredNorm() <= 64.f;
+}
+
+bool map_support_preserved(const WindowBackend::FrameInput& input, const Graph& candidate,
+                           const std::map<TrackId, Vector3T>& candidate_points, bool enforce) {
+  const auto& rig = input.rig;
+  const auto& cal = input.calibration;
+  const auto to_rig = [&](const Pose& pose) -> Isometry3T {
+    return cal.rig_from_imu() * pose.w_from_imu.inverse();
+  };
+  const auto old_current = to_rig(input.tracked);
+  const auto new_current = to_rig(candidate.nodes.back().pose);
+  MapSupport current;
+  for (const auto& observation : input.observations) {
+    const auto old_point = input.landmarks.find(observation.id);
+    if (old_point == input.landmarks.end()) {
+      continue;
+    }
+    const auto new_point = candidate_points.find(observation.id);
+    current.before += reprojection_inlier(rig, old_current, observation, old_point->second);
+    current.after += reprojection_inlier(rig, new_current, observation,
+        new_point == candidate_points.end() ? old_point->second : new_point->second);
+  }
+
+  // Older keyframes can observe the same landmarks without contributing to
+  // this window's objective. Check their support before changing shared geometry.
+  const auto submap = input.map.get_recent_submap(20);
+  MapSupport historical;
+  bool historical_ok = true;
+  for (size_t i = 0; i < submap.consecutive_keyframes.size(); ++i) {
+    const auto& keyframe = submap.consecutive_keyframes[i].keyframe;
+    const auto node = std::find_if(candidate.nodes.begin(), candidate.nodes.end(),
+        [&](const Node& value) { return value.t == keyframe->time_ns(); });
+    const Isometry3T old_pose = keyframe->get_state().rig_from_w;
+    const Isometry3T new_pose = node == candidate.nodes.end() ? old_pose : to_rig(node->pose);
+    MapSupport row;
+    for (const auto& entry : submap.landmark_and_obs[i]) {
+      const auto old_point = entry.landmark->get_pose();
+      if (!old_point) {
+        continue;
+      }
+      const auto new_point = candidate_points.find(entry.landmark->id());
+      for (const auto& observation : entry.observations) {
+        row.before += reprojection_inlier(rig, old_pose, observation, *old_point);
+        row.after += reprojection_inlier(rig, new_pose, observation,
+            new_point == candidate_points.end() ? *old_point : new_point->second);
+      }
+    }
+    historical.before += row.before;
+    historical.after += row.after;
+    historical_ok &= row.preserved();
+  }
+  const bool accepted = current.preserved() && historical_ok;
+  TraceMessage("WINDOW_MAP_GUARD t=%lld enforce=%d accept=%d current_before=%d current_after=%d "
+               "history_before=%d history_after=%d history_ok=%d points=%zu",
+               (long long)input.time_ns, int(enforce), int(accepted), current.before, current.after,
+               historical.before, historical.after, int(historical_ok), candidate_points.size());
+  return !enforce || accepted;
+}
+
 WinProblem pack(Graph&g,const imu::ImuCalibration&cal,const camera::Rig&rig,const Vector3T&gravity,int iterations,double huber,std::vector<TrackId>&ids){
  int invalid_depth=0;
  for(auto&node:g.nodes){auto&observations=node.observations;observations.erase(std::remove_if(observations.begin(),observations.end(),[&](const auto&o){auto it=g.points.find(o.id);if(it==g.points.end()||o.cam_id>=rig.num_cameras){++invalid_depth;return true;}const Vector3T pc=rig.camera_from_rig[o.cam_id]*cal.rig_from_imu()*node.pose.w_from_imu.inverse()*it->second;if(!pc.allFinite()||pc.z()<=.05f){++invalid_depth;return true;}return false;}),observations.end());}
@@ -29,7 +135,7 @@ WinProblem pack(Graph&g,const imu::ImuCalibration&cal,const camera::Rig&rig,cons
 double cost(const WinEvaluation&e,double huber){double s=0;for(auto x:e.edge){s+=.5*x*x;}for(auto x:e.prior){s+=.5*x*x;}for(size_t i=0;i<e.visual.size();i+=2){double n=std::hypot(e.visual[i],e.visual[i+1]);s+=n>huber?huber*n-.5*huber*huber:.5*n*n;}return s;}
 
 }
-struct WindowBackend::Impl {Graph active,pending;bool have_pending=false;Vector3T gravity;imu::ImuCalibration cal;camera::Rig rig;int iterations=7;double huber=1;size_t commits=0;};
+struct WindowBackend::Impl {Graph active,pending;std::map<TrackId, Vector3T> pending_points;std::map<int64_t,map::State> map_anchors;bool pending_map_write=true;bool have_pending=false;Vector3T gravity;imu::ImuCalibration cal;camera::Rig rig;int iterations=7;double huber=1;size_t commits=0;};
 WindowBackend::WindowBackend():impl_(std::make_unique<Impl>()){}
 WindowBackend::~WindowBackend()=default;
 void WindowBackend::discard_pending(){impl_->have_pending=false;impl_->pending=Graph{};}
@@ -43,7 +149,16 @@ bool WindowBackend::solve(const FrameInput& input,Pose& result){
 
  auto&d=*impl_;d.have_pending=false;if(previous_t<0||t<=previous_t){reset();return false;}if(!d.active.nodes.empty()&&(d.gravity-gravity).norm()>1e-4){reset();return solve(input,result);}if(!d.active.nodes.empty()) {
  auto recent=map.get_recent_submap(20);bool changed=false;
- for(auto&k:recent.consecutive_keyframes){for(auto&n:d.active.nodes){if(k.keyframe->time_ns()!=n.t){continue;}auto state=k.keyframe->get_state();Isometry3T mapped=state.rig_from_w.inverse()*cal.rig_from_imu();changed=changed||(mapped.matrix()-n.pose.w_from_imu.matrix()).norm()>1e-4f||(state.velocity-n.pose.velocity).norm()>1e-4f||(state.gyro_bias-n.pose.gyro_bias).norm()>1e-4f||(state.acc_bias-n.pose.acc_bias).norm()>1e-4f;}}
+ for(auto&k:recent.consecutive_keyframes){for(auto&n:d.active.nodes){if(k.keyframe->time_ns()!=n.t){continue;}auto state=k.keyframe->get_state();
+ auto anchor = d.map_anchors.find(n.t);
+ if (anchor == d.map_anchors.end()) {
+   continue;
+ }
+ const auto& expected = anchor->second;
+ changed = changed || (state.rig_from_w.matrix() - expected.rig_from_w.matrix()).norm() > 1e-4f ||
+           (state.velocity - expected.velocity).norm() > 1e-4f ||
+           (state.gyro_bias - expected.gyro_bias).norm() > 1e-4f ||
+           (state.acc_bias - expected.acc_bias).norm() > 1e-4f;}}
  if(changed){TraceMessage("WINDOW_RESET reason=external_map_correction t=%lld",(long long)t);reset();return solve(input,result);}
  }
  d.cal=cal;d.rig=rig;d.gravity=gravity;d.iterations=settings.max_iteration;d.huber=settings.robustifier_scale;
@@ -63,7 +178,17 @@ bool WindowBackend::solve(const FrameInput& input,Pose& result){
  for(int pass=0;pass<2;++pass){
    ids.clear();auto p=pack(g,cal,rig,gravity,settings.max_iteration,settings.robustifier_scale,ids);
    if(p.visuals.size()<size_t(settings.min_observations)||g.nodes.back().observations.size()<size_t(settings.min_observations)){return false;}
-   solved=Optimize(p);auto evaluation=Evaluate(p,solved);after=cost(evaluation,p.huber);
+   const auto optimizer_start = Clock::now();
+   if (cpu_window()) {
+     solved = OptimizeCpu(p);
+   } else {
+     solved = schur_window() ? OptimizeSchur(p) : Optimize(p);
+   }
+   const double optimizer_ms = elapsed(optimizer_start);
+   TraceMessage("SCALE_SOLVE t=%lld pass=%d states=%d points=%zu obs=%zu ms=%.6f schur_ms=%.6f iterations=%d",
+                (long long)t, pass, p.count, ids.size(), p.visuals.size(), optimizer_ms,
+                solved.landmark_ms, solved.iterations);
+   auto evaluation=evaluate_window(p,solved);after=cost(evaluation,p.huber);
    if(!std::isfinite(after)||after>solved.before+1e-4*std::max(1.f,solved.before)){
      TraceMessage("WINDOW_REJECT t=%lld reason=objective before=%.9g after=%.9g",(long long)t,solved.before,after);return false;
    }
@@ -105,16 +230,66 @@ bool WindowBackend::solve(const FrameInput& input,Pose& result){
  TraceMessage("WINDOW_GATE t=%lld accept=%d score=%.9g dp=%.9g",(long long)t,int(accept),score,delta.norm());
  if(!accept){return false;}
  // Re-express final normal equations in the newly anchored tangent coordinates.
- ids.clear();auto final=pack(g,cal,rig,gravity,settings.max_iteration,settings.robustifier_scale,ids);WinResult zero;zero.points.resize(3*ids.size());auto linear=Evaluate(final,zero);auto reduced=assemble(final,linear,false);int n=15*(g.nodes.size()-1);WMatrix final_rows;WVector final_residual;project_out(reduced.rows.leftCols(n),reduced.rows.middleCols(n,15),reduced.residual,final_rows,final_residual);g.nodes.back().pose.info=(final_rows.transpose()*final_rows).cast<float>();result=g.nodes.back().pose;
- if(!result.info.allFinite()||!result.velocity.allFinite()||!result.w_from_imu.matrix().allFinite()){return false;}if(input.accept_candidate&&!input.accept_candidate(result,g.points)){return false;}d.pending=std::move(g);d.have_pending=true;
+ ids.clear();auto final=pack(g,cal,rig,gravity,settings.max_iteration,settings.robustifier_scale,ids);WinResult zero;zero.points.resize(3*ids.size());auto linear=evaluate_window(final,zero);
+ const auto elimination_start = Clock::now();
+ auto reduced=assemble(final,linear,false);
+ TraceMessage("SCALE_POINT_QR t=%lld stage=posterior states=%d points=%zu ms=%.6f",
+              (long long)t, final.count, ids.size(), elapsed(elimination_start));int n=15*(g.nodes.size()-1);WMatrix final_rows;WVector final_residual;project_out(reduced.rows.leftCols(n),reduced.rows.middleCols(n,15),reduced.residual,final_rows,final_residual);g.nodes.back().pose.info=(final_rows.transpose()*final_rows).cast<float>();result=g.nodes.back().pose;
+ if(!result.info.allFinite()||!result.velocity.allFinite()||!result.w_from_imu.matrix().allFinite()){return false;}const bool enforce_map = std::getenv("CUVSLAM_WINDOW_MAP_AUDIT_ONLY") == nullptr;
+ std::map<TrackId, Vector3T> supported_points;
+ for (const auto id : ids) {
+   supported_points.emplace(id, g.points.at(id));
+ }
+ const bool map_safe = map_support_preserved(input, g, enforce_map ? supported_points : g.points, enforce_map);
+ auto publish_points = enforce_map ? std::move(supported_points) : g.points;
+ auto visible_points = publish_points;
+ for (const auto& point : input.landmarks) {
+   visible_points.emplace(point.first, point.second);
+ }
+ if (input.accept_candidate && !input.accept_candidate(result, enforce_map ? visible_points : g.points)) {
+   return false;
+ }
+ d.pending_map_write = map_safe;
+ if (map_safe) {
+   d.pending_points = std::move(publish_points);
+ } else {
+   // Keep the validated local state for future window iterations, while the
+   // frontend continues publishing its separately validated pose and map.
+   result = tracked;
+   d.pending_points.clear();
+   TraceMessage("WINDOW_LOCAL_ONLY t=%lld states=%zu", (long long)t, g.nodes.size());
+ }
+ d.pending=std::move(g);d.have_pending=true;
  TraceMessage("WINDOW_SOLVE t=%lld states=%zu points=%zu obs=%zu iterations=%d before=%.9g after=%.9g",(long long)t,d.pending.nodes.size(),ids.size(),final.visuals.size(),solved.iterations,solved.before,after);return true;
 }
 void WindowBackend::commit(map::UnifiedMap&map,const imu::ImuCalibration&cal,int64_t t){auto&d=*impl_;if(!d.have_pending||d.pending.nodes.back().t!=t){return;}Graph g=std::move(d.pending);d.have_pending=false;
  // Defer all map writes until marginalization has completed successfully.
- const auto publish_nodes=g.nodes;const auto publish_points=g.points;
+ const auto publish_nodes=g.nodes;const auto publish_points=std::move(d.pending_points);
  auto publish=[&](){auto sub=map.get_recent_submap(20);for(auto&k:sub.consecutive_keyframes){for(auto&n:publish_nodes){if(k.keyframe->time_ns()==n.t){k.keyframe->set_state(map::State{(n.pose.w_from_imu*cal.rig_from_imu().inverse()).inverse(),n.pose.velocity,n.pose.acc_bias,n.pose.gyro_bias});}}}for(auto&row:sub.landmark_and_obs){for(auto&v:row){auto it=publish_points.find(v.landmark->id());if(it!=publish_points.end()){v.landmark->set_pose(it->second);}}}};
- if(g.nodes.size()==Slots){std::vector<TrackId>ids;auto p=pack(g,d.cal,d.rig,d.gravity,d.iterations,d.huber,ids);WinResult zero;zero.points.resize(3*ids.size());auto reduced=eliminate_first(assemble(p,Evaluate(p,zero),true),p.count);const int n=15*(p.count-1);WMatrix W;WVector c;compress_prior(reduced.rows.leftCols(n),reduced.residual,W,c);std::set<TrackId>remove;for(auto&o:g.nodes.front().observations){remove.insert(o.id);}g.nodes.erase(g.nodes.begin());for(auto&node:g.nodes){auto&v=node.observations;v.erase(std::remove_if(v.begin(),v.end(),[&](auto&o){return remove.count(o.id);}),v.end());}for(auto id:remove){g.points.erase(id);}g.W.setZero();g.c.setZero();g.W.topLeftCorner(n,n)=W;g.c.head(n)=c;for(int i=0;i<p.count-1;++i){g.anchors[i]=pack_state(g.nodes[i].pose);}TraceMessage("WINDOW_MARG t=%lld retained=%zu retired_points=%zu prior_norm=%.9g linear_norm=%.9g",(long long)t,g.nodes.size(),remove.size(),g.W.norm(),g.c.norm());}
- publish();
+ if(g.nodes.size()==static_cast<size_t>(window_limit())){std::vector<TrackId>ids;auto p=pack(g,d.cal,d.rig,d.gravity,d.iterations,d.huber,ids);WinResult zero;zero.points.resize(3*ids.size());auto linear = evaluate_window(p,zero);
+ const auto point_start = Clock::now();
+ const auto point_reduced = assemble(p,linear,true);
+ const double point_ms = elapsed(point_start);
+ const auto marginal_start = Clock::now();
+ auto reduced = eliminate_first(point_reduced,p.count);const int n=15*(p.count-1);WMatrix W;WVector c;compress_prior(reduced.rows.leftCols(n),reduced.residual,W,c);
+ const double marginal_ms = elapsed(marginal_start);
+ TraceMessage("SCALE_MARG t=%lld states=%d points=%zu point_ms=%.6f marginal_ms=%.6f",
+              (long long)t, p.count, ids.size(), point_ms, marginal_ms);
+ std::set<TrackId>remove;for(auto&o:g.nodes.front().observations){remove.insert(o.id);}g.nodes.erase(g.nodes.begin());for(auto&node:g.nodes){auto&v=node.observations;v.erase(std::remove_if(v.begin(),v.end(),[&](auto&o){return remove.count(o.id);}),v.end());}for(auto id:remove){g.points.erase(id);}g.W.setZero();g.c.setZero();g.W.topLeftCorner(n,n)=W;g.c.head(n)=c;for(int i=0;i<p.count-1;++i){g.anchors[i]=pack_state(g.nodes[i].pose);}TraceMessage("WINDOW_MARG t=%lld retained=%zu retired_points=%zu prior_norm=%.9g linear_norm=%.9g",(long long)t,g.nodes.size(),remove.size(),g.W.norm(),g.c.norm());}
+ const auto publish_start = Clock::now();
+ if (d.pending_map_write) {
+   publish();
+ }
+ // The local trajectory may differ from the published map after a local-only
+ // commit. Compare later external updates against the published map snapshot.
+ d.map_anchors.clear();
+ for (const auto& keyframe : map.get_recent_submap(20).consecutive_keyframes) {
+   const auto time = keyframe.keyframe->time_ns();
+   if (std::any_of(g.nodes.begin(), g.nodes.end(), [&](const Node& node) { return node.t == time; })) {
+     d.map_anchors.emplace(time, keyframe.keyframe->get_state());
+   }
+ }
+ TraceMessage("SCALE_MAP_PUBLISH t=%lld ms=%.6f", (long long)t, elapsed(publish_start));
  // Drop unreferenced temporary points to keep memory bounded.
  std::set<TrackId>used;for(auto&n:g.nodes){for(auto&o:n.observations){used.insert(o.id);}}for(auto it=g.points.begin();it!=g.points.end();){if(!used.count(it->first)){it=g.points.erase(it);}else{++it;}}d.active=std::move(g);++d.commits;TraceMessage("WINDOW_COMMIT t=%lld keyframes=%zu commits=%zu",(long long)t,d.active.nodes.size(),d.commits);
 }

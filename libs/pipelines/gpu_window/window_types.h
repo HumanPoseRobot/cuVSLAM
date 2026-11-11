@@ -33,7 +33,11 @@ struct Result {
   std::vector<float> points;
   float before = 0, after = 0;
   int iterations = 0;
+  double landmark_ms = 0;
 };
 Result Optimize(const Problem&);
+Result OptimizeSchur(const Problem&);
 Evaluation Evaluate(const Problem&, const Result&);
+Evaluation EvaluateCpu(const Problem&, const Result&);
+Result OptimizeCpu(const Problem&);
 }  // namespace gpu_window

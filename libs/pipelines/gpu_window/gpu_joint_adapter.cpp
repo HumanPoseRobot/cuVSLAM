@@ -2,6 +2,7 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include "common/log.h"
 #include "gpu_joint_math.h"
@@ -162,16 +163,20 @@ void AuditGpuJoint(const imu::ImuCalibration& cal, const StereoPnPInput& input, 
 }
 // Solver integration is enabled in stage 2 only after the shadow audit passes.
 bool SolveGpuJoint(const imu::ImuCalibration& calib, const StereoPnPInput& problem, Pose& left, Pose& right,
-                   float penalty) {
+                   float penalty, bool reuse_lm) {
   if (!problem.shared_bias || problem.prior_gyro != 0 || problem.prior_acc != 0 ||
       problem.translation_constraint != 0 || problem.robustifier_scale_pose > 0) {
     throw std::runtime_error("GPU VI backend received unsupported objective");
   }
+  using Clock = std::chrono::steady_clock;
+  const auto start = Clock::now();
   gpu_vi::Data data;
   std::vector<gpu_vi::Observation> obs;
   Pack(calib, problem, left, right, penalty, data, obs);
+  const auto packed = Clock::now();
   const Pose original_left = left, original_right = right;
-  auto solution = gpu_vi::OptimizeGpu(data, obs, problem.robustifier_scale, problem.max_iterations);
+  auto solution = gpu_vi::OptimizeGpu(data, obs, problem.robustifier_scale, problem.max_iterations, reuse_lm);
+  const auto gpu_returned = Clock::now();
   Pose l, r;
   Unpack(data, solution.state, original_left, original_right, l, r);
   Pose zero;
@@ -179,6 +184,7 @@ bool SolveGpuJoint(const imu::ImuCalibration& calib, const StereoPnPInput& probl
   const double before =
       EvaluateCost(calib, problem, outliers, original_left, original_left, original_right, zero, zero, penalty);
   const double after = EvaluateCost(calib, problem, outliers, original_left, l, r, zero, zero, penalty);
+  const auto costs_ready = Clock::now();
   TraceMessage("GPU_VI_SOLVE iterations=%d cpu_initial=%.9g cpu_final=%.9g gpu_initial=%.9g gpu_final=%.9g",
                solution.iterations, before, after, solution.initial_cost, solution.final_cost);
   if (!std::isfinite(after) || after > before + 1e-4 * std::max(1., before)) {
@@ -186,9 +192,11 @@ bool SolveGpuJoint(const imu::ImuCalibration& calib, const StereoPnPInput& probl
   }
   // Stage 2 preserves the independently tested CPU posterior assembly/Schur
   // update. Residual evaluation, state updates and LM solve run in cuNLS GPU.
+  const auto checked = Clock::now();
   Mat30 full;
   Vec30 gradient;
   build_hessian(calib, problem, outliers, original_left, l, r, penalty, full, gradient);
+  const auto hessian_ready = Clock::now();
   Eigen::MatrixXd h = full.topLeftCorner<24, 24>().cast<double>();
   h = (.5 * (h + h.transpose())).eval();
   // Eliminate old pose and velocity, retain right pose/velocity and common bias.
@@ -219,6 +227,15 @@ bool SolveGpuJoint(const imu::ImuCalibration& calib, const StereoPnPInput& probl
   if (!r.info.allFinite()) return false;
   left = std::move(l);
   right = std::move(r);
+  const auto done = Clock::now();
+  const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+  TraceMessage("GPU_VI_SEGMENTS sparse=%d obs=%zu iters=%d pack=%.6f buffer=%.6f graph=%.6f lm=%.6f copy=%.6f "
+               "cleanup=%.6f cost_check=%.6f trace=%.6f hessian=%.6f posterior=%.6f total=%.6f",
+               int(reuse_lm), obs.size(), solution.iterations, ms(start, packed), solution.buffer_ms, solution.graph_ms,
+               solution.lm_ms, solution.copy_ms,
+               ms(packed, gpu_returned) - solution.buffer_ms - solution.graph_ms - solution.lm_ms - solution.copy_ms,
+               ms(gpu_returned, costs_ready), ms(costs_ready, checked), ms(checked, hessian_ready),
+               ms(hessian_ready, done), ms(start, done) - ms(costs_ready, checked));
   return true;
 }
 

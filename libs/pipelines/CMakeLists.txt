@@ -62,7 +62,7 @@ endif()
 # also gated here because it includes pnp/multisensor_pose_estimator.h for the RGBDInfo struct.
 if(USE_CUNLS)
     enable_language(CUDA)
-    set(SOURCES ${SOURCES} gpu_window/window_backend.cpp gpu_window/window_gpu.cu
+    set(SOURCES ${SOURCES} gpu_window/window_backend.cpp gpu_window/window_gpu.cu gpu_window/window_cpu.cpp
         gpu_window/gpu_joint_adapter.cpp gpu_window/gpu_joint_ad.cu)
     set(LIBS ${LIBS} cunls::cunls)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/gpu_window)

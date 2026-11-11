@@ -1,6 +1,7 @@
 #include <cunls/cunls.h>
 #include <stdexcept>
 #include "window_math.h"
+#include "window_gpu_schur.cuh"
 namespace gpu_window {
 void check(cudaError_t e) {
   if (e != cudaSuccess) {
@@ -50,27 +51,29 @@ __global__ void visual_kernel(const State* ns, const double* pts, const Visual* 
     }
   }
 }
+template<int Frames>
 __global__ void prior_kernel(const Prior* p, float const* const* ptr, float* r, float* J) {
+  constexpr int ActiveDim = Frames * 15;
   int c = threadIdx.x - 1;
-  if (c >= Dim) {
+  if (c >= ActiveDim) {
     return;
   }
-  gpu_vi::Jet delta[Dim], x[15];
-  for (int s = 0; s < Slots; ++s) {
+  gpu_vi::Jet delta[ActiveDim], x[15];
+  for (int s = 0; s < Frames; ++s) {
     for (int k = 0; k < 15; ++k) {
       x[k] = {ptr[s][k], 15 * s + k == c ? 1. : 0.};
     }
     difference(p->nodes[s], p->anchors[s], x, delta + 15 * s);
   }
-  for (int i = 0; i < Dim; ++i) {
+  for (int i = 0; i < ActiveDim; ++i) {
     gpu_vi::Jet y(p->offset[i]);
-    for (int j = 0; j < Dim; ++j) {
+    for (int j = 0; j < ActiveDim; ++j) {
       y += p->W[i * Dim + j] * delta[j];
     }
     if (c < 0) {
       r[i] = y.v;
     } else if (J) {
-      J[i * Dim + c] = y.d;
+      J[i * ActiveDim + c] = y.d;
     }
   }
 }
@@ -101,14 +104,15 @@ public:
     return cudaGetLastError() == cudaSuccess;
   }
 };
-class PF : public cunls::SizedFactorBatch<Dim, 15, 15, 15, 15, 15, 15> {
+template<int... Indices>
+class PriorFactor : public cunls::SizedFactorBatch<15 * sizeof...(Indices), (15 + 0 * Indices)...> {
   const Prior* p_;
 
 public:
-  explicit PF(const Prior* p) : p_(p) {}
+  explicit PriorFactor(const Prior* p) : p_(p) {}
   size_t NumFactors() const override { return 1; }
   bool Evaluate(float* r, float* j, float const* const* s, cudaStream_t st) const override {
-    prior_kernel<<<1, 128, 0, st>>>(p_, s, r, j);
+    prior_kernel<sizeof...(Indices)><<<1, 128, 0, st>>>(p_, s, r, j);
     return cudaGetLastError() == cudaSuccess;
   }
 };
@@ -155,7 +159,7 @@ Evaluation Evaluate(const Problem& p, const Result& r) {
   Evaluation out;
   EF ef(b.nodes.data(), b.edges.data(), p.edges.size());
   VF vf(b.nodes.data(), b.points.data(), b.visuals.data(), p.visuals.size());
-  PF pf(b.prior.data());
+  PriorFactor<0, 1, 2, 3, 4, 5> pf(b.prior.data());
   auto run = [&](auto& f, std::vector<float*>& ptr, int rows, int cols, std::vector<float>& rs,
                  std::vector<float>& js) {
     if (rows == 0) {
@@ -176,7 +180,8 @@ Evaluation Evaluate(const Problem& p, const Result& r) {
   run(pf, b.pp, Dim, Dim, out.prior, out.prior_j);
   return out;
 }
-Result Optimize(const Problem& p) {
+template<int... Indices>
+Result OptimizeActive(const Problem& p, std::integer_sequence<int, Indices...>, bool use_schur) {
   struct Stream {
     cudaStream_t s;
     Stream() { check(cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking)); }
@@ -184,7 +189,7 @@ Result Optimize(const Problem& p) {
   } stream;
   Result r;
   Buffers b(p, r);
-  cunls::VectorStateBatch<15> states(b.x.data(), Slots);
+  cunls::VectorStateBatch<15> states(b.x.data(), p.count);
   cunls::VectorStateBatch<3> points(b.px.data(), p.points.size());
   cunls::Problem problem;
   problem.AddStateBatch(&states);
@@ -193,7 +198,8 @@ Result Optimize(const Problem& p) {
   }
   EF ef(b.nodes.data(), b.edges.data(), p.edges.size());
   VF vf(b.nodes.data(), b.points.data(), b.visuals.data(), p.visuals.size());
-  PF pf(b.prior.data());
+  PriorFactor<Indices...> pf(b.prior.data());
+  b.pp.resize(p.count);
   cunls::HuberLossFunctionBatch huber(p.huber);
   problem.AddFactorBatch(&pf, b.pp);
   if (!p.edges.empty()) {
@@ -216,7 +222,7 @@ Result Optimize(const Problem& p) {
   opt.base_options.sparse_linear_solver_config.block_sparse_pcg_options.relative_tolerance = 1e-5;
   opt.base_options.cost_tolerance = 1e-7;
   opt.base_options.state_tolerance = 1e-10;
-  cunls::LevenbergMarquardtMinimizer lm(opt);
+  schur::Minimizer lm(opt, 15 * p.count, use_schur);
   auto summary = lm.Minimize(stream.s, problem);
   check(cudaMemcpy(r.x.data(), b.x.data(), Dim * sizeof(float), cudaMemcpyDeviceToHost));
   r.points.resize(p.points.size() * 3);
@@ -228,4 +234,16 @@ Result Optimize(const Problem& p) {
   r.iterations = summary.num_iterations;
   return r;
 }
+Result OptimizeWindow(const Problem& p, bool use_schur) {
+  switch (p.count) {
+    case 2: return OptimizeActive(p, std::make_integer_sequence<int, 2>{}, use_schur);
+    case 3: return OptimizeActive(p, std::make_integer_sequence<int, 3>{}, use_schur);
+    case 4: return OptimizeActive(p, std::make_integer_sequence<int, 4>{}, use_schur);
+    case 5: return OptimizeActive(p, std::make_integer_sequence<int, 5>{}, use_schur);
+    case 6: return OptimizeActive(p, std::make_integer_sequence<int, 6>{}, use_schur);
+    default: throw std::runtime_error("unsupported active window size");
+  }
+}
+Result Optimize(const Problem& p) { return OptimizeWindow(p, false); }
+Result OptimizeSchur(const Problem& p) { return OptimizeWindow(p, true); }
 }  // namespace gpu_window

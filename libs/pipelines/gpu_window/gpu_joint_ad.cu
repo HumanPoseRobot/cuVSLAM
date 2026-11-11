@@ -1,5 +1,7 @@
 #include <cunls/cunls.h>
 #include <stdexcept>
+#include <chrono>
+#include <memory>
 #include "gpu_joint_math_ad.h"
 namespace gpu_vi {
 inline void check(cudaError_t e) {
@@ -84,7 +86,8 @@ Evaluation EvaluateGpu(const Data& d, const std::vector<Observation>& obs, const
   run(visual, obs.size() * 2, out.visual, out.visual_j);
   return out;
 }
-Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float huber, int iterations) {
+Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float huber, int iterations, bool reuse_lm) {
+  const auto start = std::chrono::steady_clock::now();
   struct Stream {
     cudaStream_t value;
     Stream() { check(cudaStreamCreateWithFlags(&value, cudaStreamNonBlocking)); }
@@ -92,6 +95,7 @@ Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float hub
   } stream;
   Result result;
   Buffers b(d, obs, result.state);
+  const auto buffers_ready = std::chrono::steady_clock::now();
   cunls::VectorStateBatch<9> poses(b.x.data(), 2);
   cunls::VectorStateBatch<6> bias(b.x.data() + 18, 1);
   cunls::Problem problem;
@@ -99,7 +103,10 @@ Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float hub
   problem.AddStateBatch(&bias);
   std::vector<float*> one = {poses.StateBlockDevicePtr(0), poses.StateBlockDevicePtr(1), bias.StateBlockDevicePtr(0)},
                       many;
-  for (size_t i = 0; i < obs.size(); ++i) many.insert(many.end(), one.begin(), one.end());
+  many.reserve(3 * obs.size());
+  for (size_t i = 0; i < obs.size(); ++i) {
+    many.insert(many.end(), one.begin(), one.end());
+  }
   Factor<0, 9> imu(b.d.data(), nullptr, 1);
   Factor<1, 15> prior(b.d.data(), nullptr, 1);
   Factor<2, 2> visual(b.d.data(), b.obs.data(), obs.size());
@@ -117,9 +124,48 @@ Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float hub
   options.base_options.sparse_linear_solver_type = cunls::SparseLinearSolverType::DenseLDLT;
   options.base_options.state_tolerance = 1e-14;
   options.base_options.cost_tolerance = 1e-9;
-  cunls::LevenbergMarquardtMinimizer lm(options);
-  auto summary = lm.Minimize(stream.value, problem);
+  // Minimize reinitializes the graph, state snapshots and damping every call.
+  // Keep the allocations thread-local and use a fresh instance after a device switch.
+  struct Workspace {
+    int device = -1;
+    int iterations = 0;
+    std::unique_ptr<cunls::LevenbergMarquardtMinimizer> minimizer;
+  };
+  thread_local Workspace workspace;
+  std::unique_ptr<cunls::LevenbergMarquardtMinimizer> temporary;
+  auto* storage = &temporary;
+  if (reuse_lm) {
+    int device = -1;
+    check(cudaGetDevice(&device));
+    if (workspace.device == -1 || workspace.device == device) {
+      if (workspace.iterations != iterations) {
+        workspace.minimizer.reset();
+      }
+      workspace.device = device;
+      workspace.iterations = iterations;
+      storage = &workspace.minimizer;
+    }
+  }
+  if (!*storage) {
+    *storage = std::make_unique<cunls::LevenbergMarquardtMinimizer>(options);
+  }
+  const auto graph_ready = std::chrono::steady_clock::now();
+  cunls::MinimizerSummary summary;
+  try {
+    summary = (*storage)->Minimize(stream.value, problem);
+  } catch (...) {
+    cudaStreamSynchronize(stream.value);
+    storage->reset();
+    throw;
+  }
+  const auto lm_returned = std::chrono::steady_clock::now();
   check(cudaMemcpy(result.state, b.x.data(), 24 * sizeof(float), cudaMemcpyDeviceToHost));
+  const auto copied = std::chrono::steady_clock::now();
+  const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+  result.buffer_ms = ms(start, buffers_ready);
+  result.graph_ms = ms(buffers_ready, graph_ready);
+  result.lm_ms = ms(graph_ready, lm_returned);
+  result.copy_ms = ms(lm_returned, copied);
   result.initial_cost = summary.initial_cost;
   result.final_cost = summary.final_cost;
   result.iterations = summary.num_iterations;

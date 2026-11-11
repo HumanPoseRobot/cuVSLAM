@@ -50,9 +50,14 @@ void MonoSOFGPU::launch(ImageContextPtr curr_image, const ImageContextPtr &prev_
 
     assert(!track.dead());
 
+    // Slots are reused across frames and can now belong to a different track.
+    // Start with a zero offset when this track has no projected position.
+    data = TrackData{};
+    retrackdata = TrackData{};
+
     if (predictedUVs_[k]) {
       Vector2T uv = *predictedUVs_[k];
-      data.offset = retrackdata.offset = {uv.x() - position.x(), uv.y() - position.y()};
+      data.offset = {uv.x() - position.x(), uv.y() - position.y()};
     }
     data.track = retrackdata.track = {position.x(), position.y()};
     data.track_status = retrackdata.track_status = false;

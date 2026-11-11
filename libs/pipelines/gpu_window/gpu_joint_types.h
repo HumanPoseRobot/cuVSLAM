@@ -18,7 +18,8 @@ struct Result {
   float state[24]{};
   float initial_cost = 0, final_cost = 0;
   int iterations = 0;
+  double buffer_ms = 0, graph_ms = 0, lm_ms = 0, copy_ms = 0;
 };
 Evaluation EvaluateGpu(const Data&, const std::vector<Observation>&, const float state[24]);
-Result OptimizeGpu(const Data&, const std::vector<Observation>&, float huber, int iterations);
+Result OptimizeGpu(const Data&, const std::vector<Observation>&, float huber, int iterations, bool reuse_lm);
 }  // namespace gpu_vi

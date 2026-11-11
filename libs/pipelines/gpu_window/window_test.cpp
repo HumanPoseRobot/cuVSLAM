@@ -148,6 +148,13 @@ int main() {
     }
   }
   auto sol = Optimize(p);
+  auto schur = OptimizeSchur(p);
+  auto cpu = OptimizeCpu(p);
+  assert(std::abs(schur.before - cpu.before) <= 1e-5 * std::max(1.f, cpu.before));
+  assert(std::abs(schur.after - cpu.after) <= 1e-3 * std::max(1.f, cpu.after));
+  for (int i = 0; i < 15 * p.count; ++i) {
+    assert(std::abs(schur.x[i] - cpu.x[i]) < 1e-2);
+  }
   assert(std::isfinite(sol.after) && sol.after < sol.before * .01);
   std::cout << "six-state GPU solve: " << sol.before << " -> " << sol.after << "\n";
   double score;
