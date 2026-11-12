@@ -394,8 +394,9 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
 
   {
     TRACE_EVENT minimize_ev = profiler_domain_.trace_event("minimizer");
-    // Pure visual PnP has one six-DoF pose and uses fixed-order normal equations.
-    minimizer_.Minimize(s, problem, num_depth == 0 && !imu_in.has_value());
+    // Visual PnP and its inertial prior share the same six-DoF active pose.
+    // The prior adds residual rows but does not add active state variables.
+    minimizer_.Minimize(s, problem, num_depth == 0);
   }
 
   d_pose_.copy(cuda::ToCPU, s);
