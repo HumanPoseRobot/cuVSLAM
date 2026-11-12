@@ -12,7 +12,7 @@ Result OptimizeEliminated(const Data& data, const std::vector<Observation>& obs,
   // avoids putting nearly identical, strongly coupled bias columns in FP32 LM.
   // This is an exact reduction of this TWO-frame graph, not a frozen-bias model;
   // the multi-keyframe window retains its separate bias variables and RW edges.
-  const auto reduced = gpu_vi::OptimizeGpu(data, obs, huber, iterations, reuse);
+  const auto reduced = gpu_vi::OptimizeGpu(data, obs, huber, iterations, reuse, /*fixed_order_normal_equations=*/true);
   Result out;
   std::copy(reduced.state, reduced.state + 24, out.state);
   for (int k = 0; k < 3; ++k) {

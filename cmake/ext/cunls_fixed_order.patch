@@ -1,0 +1,165 @@
+--- a/cunls/minimizer/gauss_newton_minimizer.h
++++ b/cunls/minimizer/gauss_newton_minimizer.h
+@@ -245,7 +245,7 @@
+    *                modified in-place during optimization.
+    * @return Summary containing iteration count and cost statistics.
+    */
+-  MinimizerSummary Minimize(cudaStream_t stream, Problem &problem);
++  MinimizerSummary Minimize(cudaStream_t stream, Problem &problem, bool fixed_order_normal_equations = false);
+
+ protected:
+   /**
+@@ -336,7 +336,7 @@
+    */
+   virtual void BuildSystem(cudaStream_t stream, const Problem &problem,
+                            const MinimizerState &minimizer_state,
+-                           CSRSparseMatrix &lhs, dvector<float> &rhs);
++                           CSRSparseMatrix &lhs, dvector<float> &rhs, bool fixed_order_normal_equations);
+
+   /**
+    * @brief Updates states with the computed step.
+--- a/cunls/minimizer/gauss_newton_minimizer.cu
++++ b/cunls/minimizer/gauss_newton_minimizer.cu
+@@ -28,6 +28,60 @@
+ #include "cunls/minimizer/sparse_matrix.h"
+
+ namespace cunls {
++namespace {
++// The selected 6- and 24-variable frontends need reproducible normal
++// equations. Walk CSR rows in a fixed order and round only at the solver boundary.
++void BuildFixedOrderNormalEquations(cudaStream_t stream, const CSRSparseMatrix &jacobian,
++                                   const dvector<float> &residual, CSRSparseMatrix &hessian,
++                                   dvector<float> &rhs) {
++  constexpr size_t max_dimension = 24;
++  const size_t dimension = hessian.NumRows();
++  if (dimension != 6 && dimension != max_dimension) {
++    throw std::invalid_argument("Fixed-order normal equations require a 6- or 24-variable problem");
++  }
++  std::vector<int> row_offsets(jacobian.row_offsets.size()), columns(jacobian.col_ids.size());
++  std::vector<int> hessian_rows(hessian.row_offsets.size()), hessian_columns(hessian.col_ids.size());
++  std::vector<float> values(jacobian.values.size()), residual_values(residual.size());
++  auto download = [stream](auto &host, const auto &device) {
++    THROW_ON_CUDA_ERROR(cudaMemcpyAsync(host.data(), device.data(), host.size() * sizeof(host[0]),
++                                      cudaMemcpyDeviceToHost, stream));
++  };
++  download(row_offsets, jacobian.row_offsets);
++  download(columns, jacobian.col_ids);
++  download(values, jacobian.values);
++  download(hessian_rows, hessian.row_offsets);
++  download(hessian_columns, hessian.col_ids);
++  download(residual_values, residual);
++  THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
++
++  double normal[max_dimension][max_dimension]{};
++  double gradient[max_dimension]{};
++  for (size_t row = 0; row < residual_values.size(); ++row) {
++    for (int j = row_offsets[row]; j < row_offsets[row + 1]; ++j) {
++      const int column = columns[j];
++      const double value = values[j];
++      gradient[column] -= value * residual_values[row];
++      for (int k = row_offsets[row]; k < row_offsets[row + 1]; ++k) {
++        normal[column][columns[k]] += value * values[k];
++      }
++    }
++  }
++  std::vector<float> hessian_values(hessian_columns.size());
++  float rhs_values[max_dimension];
++  for (size_t row = 0; row < dimension; ++row) {
++    rhs_values[row] = static_cast<float>(gradient[row]);
++    for (int j = hessian_rows[row]; j < hessian_rows[row + 1]; ++j) {
++      hessian_values[j] = static_cast<float>(normal[row][hessian_columns[j]]);
++    }
++  }
++  rhs.resize(dimension);
++  THROW_ON_CUDA_ERROR(cudaMemcpyAsync(hessian.values.data(), hessian_values.data(),
++                                    hessian_values.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
++  THROW_ON_CUDA_ERROR(cudaMemcpyAsync(rhs.data(), rhs_values, dimension * sizeof(float),
++                                    cudaMemcpyHostToDevice, stream));
++  THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
++}
++}  // namespace
+
+ /**
+  * @brief Constructs a Gauss-Newton optimizer.
+@@ -243,7 +297,7 @@
+
+ void GaussNewtonMinimizer::BuildSystem(cudaStream_t stream, const Problem &problem,
+                                        const MinimizerState &minimizer_state, CSRSparseMatrix &lhs,
+-                                       dvector<float> &rhs) {
++                                       dvector<float> &rhs, bool fixed_order_normal_equations) {
+   auto range = profiler_domain_.CreateDomainRange("BuildSystem");
+   ComputeResidualAndJacobian(stream, problem, minimizer_state, residuals_, sparse_jacobian_,
+                              buffer_);
+@@ -252,11 +306,16 @@
+   // mapping
+   ConvertTripletToCSRValues(stream, sparse_jacobian_, csr_mapping_, csr_jacobian_);
+
+-  gemm_->ComputeSquaredMatrix(stream, problem, csr_jacobian_, hessian_);
+-  CopyCSRSparseMatrix(stream, hessian_, lhs);
+-  auto handle = cusparse_handle_.GetHandle(stream);
+-  ComputeRHS(stream, handle, csr_jacobian_, jacobian_dims_.num_rows, jacobian_dims_.num_cols,
+-             jacobian_dims_.num_nonzeros, residuals_, rhs, buffer_);
++  if (fixed_order_normal_equations) {
++    BuildFixedOrderNormalEquations(stream, csr_jacobian_, residuals_, hessian_, rhs);
++    CopyCSRSparseMatrix(stream, hessian_, lhs);
++  } else {
++    gemm_->ComputeSquaredMatrix(stream, problem, csr_jacobian_, hessian_);
++    CopyCSRSparseMatrix(stream, hessian_, lhs);
++    auto handle = cusparse_handle_.GetHandle(stream);
++    ComputeRHS(stream, handle, csr_jacobian_, jacobian_dims_.num_rows, jacobian_dims_.num_cols,
++               jacobian_dims_.num_nonzeros, residuals_, rhs, buffer_);
++  }
+
+   ApplyColumnScalingToNormalEquations(stream, lhs, rhs);
+ }
+@@ -459,7 +518,7 @@
+  *                modified in-place during optimization.
+  * @return Summary containing iteration count and cost statistics.
+  */
+-MinimizerSummary GaussNewtonMinimizer::Minimize(cudaStream_t stream, Problem &problem) {
++MinimizerSummary GaussNewtonMinimizer::Minimize(cudaStream_t stream, Problem &problem, bool fixed_order_normal_equations) {
+   auto range = profiler_domain_.CreateDomainRange("Minimize");
+   MinimizerSummary summary;
+
+@@ -490,7 +549,7 @@
+   }
+
+   // Build initial linear system
+-  BuildSystem(stream, problem, current_state_, lhs_work_, rhs_work_);
++  BuildSystem(stream, problem, current_state_, lhs_work_, rhs_work_, fixed_order_normal_equations);
+
+   step_.resize(rhs_work_.size());
+
+@@ -563,7 +622,7 @@
+       current_state_.Copy(stream, updated_state_.GetStates());
+     }
+
+-    BuildSystem(stream, problem, current_state_, lhs_work_, rhs_work_);
++    BuildSystem(stream, problem, current_state_, lhs_work_, rhs_work_, fixed_order_normal_equations);
+   };
+
+   LogMessage("Optimization finished");
+--- a/cunls/minimizer/levenberg_marquardt_minimizer.h
++++ b/cunls/minimizer/levenberg_marquardt_minimizer.h
+@@ -157,7 +157,7 @@
+    */
+   void BuildSystem(cudaStream_t stream, const Problem &problem,
+                    const MinimizerState &minimizer_state, CSRSparseMatrix &lhs,
+-                   dvector<float> &rhs) override;
++                   dvector<float> &rhs, bool fixed_order_normal_equations) override;
+
+   /**
+    * @brief Checks convergence using LM-specific criteria.
+--- a/cunls/minimizer/levenberg_marquardt_minimizer.cpp
++++ b/cunls/minimizer/levenberg_marquardt_minimizer.cpp
+@@ -44,8 +44,8 @@
+ void LevenbergMarquardtMinimizer::BuildSystem(
+     cudaStream_t stream, const Problem &problem,
+     const MinimizerState &minimizer_state, CSRSparseMatrix &lhs,
+-    dvector<float> &rhs) {
+-  GaussNewtonMinimizer::BuildSystem(stream, problem, minimizer_state, lhs, rhs);
++    dvector<float> &rhs, bool fixed_order_normal_equations) {
++  GaussNewtonMinimizer::BuildSystem(stream, problem, minimizer_state, lhs, rhs, fixed_order_normal_equations);
+   ExtractDiagonal(stream, lhs, diagonal_);
+   AddScaledDiagonal(stream, lambda_, diagonal_, lhs, lhs);
+ }

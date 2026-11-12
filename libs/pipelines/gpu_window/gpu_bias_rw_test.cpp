@@ -81,14 +81,14 @@ int main() {
   // Extreme RW precision changes uncertainty, not the conditional MAP mean.
   // Explicit FP32 normal equations are ill-conditioned here; analytical block
   // elimination must agree with the reduced objective for identical inputs.
-  const auto reference = gpu_vi::OptimizeGpu(d, obs, 1.5, 10, true);
+  const auto reference = gpu_vi::OptimizeGpu(d, obs, 1.5, 10, true, /*fixed_order_normal_equations=*/true);
   for (double weight : {1e1, 1e3, 1e5, 1e7}) {
     for (int k = 0; k < 6; ++k) {
       d.rw_sqrt[7 * k] = weight;
     }
     const auto stable = OptimizeEliminated(d, obs, 1.5, 10, true);
     for (int k = 0; k < 24; ++k) {
-      assert(std::abs(stable.state[k] - reference.state[k]) < 1e-5);
+      assert(stable.state[k] == reference.state[k]);
     }
   }
   for (int k = 0; k < 6; ++k) {

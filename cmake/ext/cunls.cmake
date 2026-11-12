@@ -48,6 +48,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cunls)
 
+# Apply to both downloaded sources and FETCHCONTENT_SOURCE_DIR_CUNLS overrides.
+# The reverse check makes repeat configuration safe without masking patch failures.
+find_program(CUNLS_PATCH_EXECUTABLE NAMES patch REQUIRED)
+set(_cunls_fixed_order_patch "${CMAKE_CURRENT_LIST_DIR}/cunls_fixed_order.patch")
+execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --dry-run --batch --forward -R -p1
+                        -i "${_cunls_fixed_order_patch}"
+                WORKING_DIRECTORY "${cunls_SOURCE_DIR}"
+                RESULT_VARIABLE _cunls_patch_applied OUTPUT_QUIET ERROR_QUIET)
+if(NOT _cunls_patch_applied EQUAL 0)
+    execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --dry-run --batch --forward -p1
+                            -i "${_cunls_fixed_order_patch}"
+                    WORKING_DIRECTORY "${cunls_SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --batch --forward -p1
+                            -i "${_cunls_fixed_order_patch}"
+                    WORKING_DIRECTORY "${cunls_SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
+endif()
+
 if(NOT TARGET cunls)
     message(FATAL_ERROR "cuNLS source build did not define the 'cunls' target")
 endif()

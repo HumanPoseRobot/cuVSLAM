@@ -86,7 +86,8 @@ Evaluation EvaluateGpu(const Data& d, const std::vector<Observation>& obs, const
   run(visual, obs.size() * 2, out.visual, out.visual_j);
   return out;
 }
-Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float huber, int iterations, bool reuse_lm) {
+Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float huber, int iterations, bool reuse_lm,
+                   bool fixed_order_normal_equations) {
   const auto start = std::chrono::steady_clock::now();
   struct Stream {
     cudaStream_t value;
@@ -152,7 +153,7 @@ Result OptimizeGpu(const Data& d, const std::vector<Observation>& obs, float hub
   const auto graph_ready = std::chrono::steady_clock::now();
   cunls::MinimizerSummary summary;
   try {
-    summary = (*storage)->Minimize(stream.value, problem);
+    summary = (*storage)->Minimize(stream.value, problem, fixed_order_normal_equations);
   } catch (...) {
     cudaStreamSynchronize(stream.value);
     storage->reset();

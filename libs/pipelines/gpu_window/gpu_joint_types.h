@@ -21,5 +21,6 @@ struct Result {
   double buffer_ms = 0, graph_ms = 0, lm_ms = 0, copy_ms = 0;
 };
 Evaluation EvaluateGpu(const Data&, const std::vector<Observation>&, const float state[24]);
-Result OptimizeGpu(const Data&, const std::vector<Observation>&, float huber, int iterations, bool reuse_lm);
+Result OptimizeGpu(const Data&, const std::vector<Observation>&, float huber, int iterations, bool reuse_lm,
+                   bool fixed_order_normal_equations = false);
 }  // namespace gpu_vi
