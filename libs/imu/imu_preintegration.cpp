@@ -18,12 +18,45 @@
 #include "imu/imu_preintegration.h"
 
 #include <algorithm>
+#include <Eigen/Geometry>
 
 #include "common/rotation_utils.h"
 #include "imu/linear_solver.h"
 #include "imu/positive_matrix.h"
 
 namespace cuvslam::sba_imu {
+namespace {
+Eigen::Matrix3d Hat(const Eigen::Vector3d& x) {
+  Eigen::Matrix3d out;
+  out << 0.,-x.z(),x.y(),x.z(),0.,-x.x(),-x.y(),x.x(),0.;
+  return out;
+}
+Eigen::Matrix3d Exp(const Eigen::Vector3d& x) {
+  const double n=x.norm();
+  if (n<1e-12) return Eigen::Matrix3d::Identity()+Hat(x);
+  return Eigen::AngleAxisd(n,x/n).toRotationMatrix();
+}
+struct Segment {
+  Eigen::Matrix3d rotation;
+  Eigen::Vector3d velocity,position;
+};
+Segment IntegrateSegment(const Eigen::Vector3d& a, const Eigen::Vector3d& w, double dt) {
+  Segment result;
+  result.rotation=Exp(w*dt);
+  // Closed-form SO(3) integrals evaluated as stable Taylor series.
+  const auto k=Hat(w*dt);
+  Eigen::Vector3d term=a,dv=a,dp=.5*a;
+  for (int i=1;i<=12;++i) {
+    term=(k*term/i).eval();
+    dv+=term/(i+1);
+    dp+=term/((i+1)*(i+2));
+  }
+  result.velocity=dt*dv;
+  result.position=dt*dt*dp;
+  return result;
+}
+}  // namespace
+
 
 IMUPreintegration::IMUPreintegration() { Initialize(Vector3T::Zero(), Vector3T::Zero()); }
 
@@ -127,30 +160,40 @@ void IMUPreintegration::update_state(const imu::ImuCalibration& calib, const imu
   Vector3T lin_acc = m.linear_acceleration - acc_bias_;
   Vector3T ang_vel = m.angular_velocity - gyro_bias_;
 
-  dP += dV * delta_t_s + 0.5f * dR * lin_acc * delta_t_s * delta_t_s;
-  dV += dR * lin_acc * delta_t_s;
-
-  A.block<3, 3>(3, 0) = -dR * delta_t_s * SkewSymmetric(lin_acc);
-  A.block<3, 3>(6, 0) = -0.5f * dR * delta_t_s * delta_t_s * SkewSymmetric(lin_acc);
-  A.block<3, 3>(6, 3) = Eigen::DiagonalMatrix<float, 3>(delta_t_s, delta_t_s, delta_t_s);
-
-  B.block<3, 3>(3, 0) = dR * delta_t_s;
-  B.block<3, 3>(6, 0) = 0.5f * dR * delta_t_s * delta_t_s;
-
-  JPa += JVa * delta_t_s - 0.5f * dR * delta_t_s * delta_t_s;
-  JPg += JVg * delta_t_s - 0.5f * dR * delta_t_s * delta_t_s * SkewSymmetric(lin_acc) * JRg;
-  JVa -= dR * delta_t_s;
-  JVg -= dR * delta_t_s * SkewSymmetric(lin_acc) * JRg;
-
-  Matrix3T deltaR;
-  math::Exp(deltaR, ang_vel * delta_t_s);
-  Matrix3T rightJ = math::twist_right_jacobian(ang_vel * delta_t_s);
-
-  dR = common::CalculateRotationFromSVD<float, 3>(dR * deltaR);
-
-  A.block<3, 3>(0, 0) = deltaR.transpose();
-  C.block<3, 3>(0, 0) = rightJ * delta_t_s;
-
+  const Eigen::Vector3d a=lin_acc.cast<double>(), w=ang_vel.cast<double>();
+  const double dt=delta_t_s;
+  const auto step=IntegrateSegment(a,w,dt);
+  const auto step_rotation=step.rotation.cast<float>();
+  const auto dv=step.velocity.cast<float>();
+  const auto dp=step.position.cast<float>();
+  A.block<3,3>(0,0)=step_rotation.transpose();
+  A.block<3,3>(3,0)=-dR*SkewSymmetric(dv);
+  A.block<3,3>(6,0)=-dR*SkewSymmetric(dp);
+  A.block<3,3>(6,3)=Matrix3T::Identity()*delta_t_s;
+  // Differentiate the selected discrete model in double precision. The
+  // same input Jacobians drive the bias correction and covariance update.
+  constexpr double epsilon=1e-4;
+  for (int i=0;i<3;++i) {
+    const Eigen::Vector3d e=epsilon*Eigen::Vector3d::Unit(i);
+    const auto ap=IntegrateSegment(a+e,w,dt);
+    const auto am=IntegrateSegment(a-e,w,dt);
+    const auto wp=IntegrateSegment(a,w+e,dt);
+    const auto wm=IntegrateSegment(a,w-e,dt);
+    const Eigen::Matrix3d dr=step.rotation.transpose()*(wp.rotation-wm.rotation)/(2*epsilon);
+    C.block<3,1>(0,i)=Eigen::Vector3d(dr(2,1)-dr(1,2),dr(0,2)-dr(2,0),dr(1,0)-dr(0,1)).cast<float>()*.5f;
+    C.block<3,1>(3,i)=dR*((wp.velocity-wm.velocity)/(2*epsilon)).cast<float>();
+    C.block<3,1>(6,i)=dR*((wp.position-wm.position)/(2*epsilon)).cast<float>();
+    B.block<3,1>(3,i)=dR*((ap.velocity-am.velocity)/(2*epsilon)).cast<float>();
+    B.block<3,1>(6,i)=dR*((ap.position-am.position)/(2*epsilon)).cast<float>();
+  }
+  JPg+=JVg*delta_t_s+A.block<3,3>(6,0)*JRg-C.block<3,3>(6,0);
+  JVg+=A.block<3,3>(3,0)*JRg-C.block<3,3>(3,0);
+  JRg=(A.block<3,3>(0,0)*JRg-C.block<3,3>(0,0)).eval();
+  JPa+=JVa*delta_t_s-B.block<3,3>(6,0);
+  JVa-=B.block<3,3>(3,0);
+  dP+=dV*delta_t_s+dR*dp;
+  dV+=dR*dv;
+  dR=common::CalculateRotationFromSVD<float,3>(dR*step_rotation);
   const float period_ratio = calib.frequency() * delta_t_s;
   cov_matrix_ = A * cov_matrix_ * A.transpose() +
                 (B * calib.acc_noise() * B.transpose() + C * calib.gyro_noise() * C.transpose()) / period_ratio;
@@ -158,7 +201,6 @@ void IMUPreintegration::update_state(const imu::ImuCalibration& calib, const imu
   acc_random_walk_accum_cov_matrix_ += calib.acc_random_walk() * period_ratio;
   gyro_random_walk_accum_cov_matrix_ += calib.gyro_random_walk() * period_ratio;
 
-  JRg = deltaR.transpose() * JRg - rightJ * delta_t_s;
   dT_s += delta_t_s;
 
   info_matrix_ = std::nullopt;
