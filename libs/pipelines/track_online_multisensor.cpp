@@ -263,7 +263,8 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   const bool ready = temporal_audit_ && pnp_result && prep.no_drops &&
                      prep.imu_state == StateMachine::State::Ok &&
                      std::none_of(depth_infos.begin(),depth_infos.end(),[](auto p){ return p != nullptr; });
-  if (!ready || !temporal_ready_) temporal_.clear();
+  const bool online_temporal = std::getenv("CUVSLAM_ONLINE_TEMPORAL") != nullptr;
+  if ((!online_temporal && (!ready || !temporal_ready_)) || frame.lost) temporal_.clear();
   temporal_ready_ = ready;
   if (frame.lost) {
     return false;
@@ -291,9 +292,11 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
       temporal_.clear();
       return false;
     }
-    temporal_.clear();
+    if (!online_temporal || just_initialized) temporal_.clear();
   }
-  if (temporal_ready_) temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,12u);
+  if (online_temporal && pnp_result && prep.no_drops && imu_->allow_map_update())
+    temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,~0u);
+  if (temporal_ready_ && !online_temporal) temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,12u);
 
   if (tracks2d && tracks3d) {
     TRACE_EVENT export_ev = profiler_domain_.trace_event("exportTracks");
@@ -316,7 +319,12 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
     landmarks = depth_maps_.build_keyframe_landmarks(world_from_rig, obs, depth_infos);
   }
 
-  if (temporal_ready_) {
+  if (std::getenv("CUVSLAM_ONLINE_TEMPORAL")) {
+    const size_t before = landmarks.size();
+    temporal_.extend(time_ns, rig_, world_from_rig, obs, recent_landmarks_, ~0u,
+                     true, 2.f, 1.75f, landmarks);
+    TraceMessage("ONLINE_TEMPORAL t=%lld added=%zu", (long long)time_ns, landmarks.size()-before);
+  } else if (temporal_ready_) {
     // Slots 2,3 are physical cameras 0,1 in the experimental rig [2,3,0,1].
     temporal_.extend(time_ns, rig_, world_from_rig, obs, recent_landmarks_, 12u, temporal_insert_,
                      temporal_strict_ ? 4.f : 2.f, temporal_strict_ ? 1.f : 1.75f, landmarks);

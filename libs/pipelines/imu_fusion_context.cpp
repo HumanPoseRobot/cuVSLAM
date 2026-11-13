@@ -176,7 +176,7 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
   input.imu_penalty = 1e-3f;
   input.min_depth = 0.05f;
   input.shared_bias = false;
-  std::array<int, 4> counts{};
+  std::array<int, camera::Rig::kMaxCameras> counts{};
   const Isometry3T rig_from_world = calib.rig_from_imu() * right.w_from_imu.inverse();
   for (const auto& obs : observations) {
     const auto it = landmarks.find(obs.id);
@@ -344,8 +344,13 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
       }
     }
   }
-  TraceMessage("JOINT_FRAME t=%lld ok=%d cams=%d,%d,%d,%d dp=%.8f dv=%.8f dbg=%.8f dba=%.8f",
-               static_cast<long long>(time_ns), static_cast<int>(ok), counts[0], counts[1], counts[2], counts[3],
+  std::string camera_counts;
+  for (int cam = 0; cam < rig.num_cameras; ++cam) {
+    if (cam != 0) camera_counts += ',';
+    camera_counts += std::to_string(counts[cam]);
+  }
+  TraceMessage("JOINT_FRAME t=%lld ok=%d cams=%s dp=%.8f dv=%.8f dbg=%.8f dba=%.8f",
+               static_cast<long long>(time_ns), static_cast<int>(ok), camera_counts.c_str(),
                (right.w_from_imu.translation() - prediction.w_from_imu.translation()).norm(),
                (right.velocity - prediction.velocity).norm(), (right.gyro_bias - prediction.gyro_bias).norm(),
                (right.acc_bias - prediction.acc_bias).norm());
@@ -521,7 +526,7 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
   joint_active_ = joint_enabled_ && planes.empty() && depth_points.empty() &&
                   std::none_of(depth_infos.begin(), depth_infos.end(), [](auto p) { return p != nullptr; });
   if (joint_active_) {
-    const bool guarded = rig_.num_cameras == 4;
+    const bool guarded = rig_.num_cameras > 2;
     sba_imu::Pose prediction;
     bool prediction_valid = false, conservative_update = false;
     has_joint_prior_ = interval_healthy && solve_joint(calib_, rig_, landmarks, observations, *maybe_gravity,

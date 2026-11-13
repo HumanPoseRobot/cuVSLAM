@@ -16,6 +16,7 @@
  */
 
 #include <memory>
+#include <cstdlib>
 
 #include "common/isometry_utils.h"
 #include "sof/internal/sof_multicamera_gpu.h"
@@ -41,12 +42,20 @@ MultiSOFGPU::MultiSOFGPU(const camera::Rig& rig, const camera::FrustumIntersecti
     : MultiSOFBase(rig, fid, sof_settings, keyframe_settings) {
   const auto& primary_cams = fid_.primary_cameras();
 
-  for (CameraId primary_cam_id : primary_cams) {
+  auto tracking_cameras = primary_cams;
+  if (std::getenv("CUVSLAM_ONLINE_TEMPORAL")) {
+    for (CameraId cam = 0; cam < rig_.num_cameras; ++cam) {
+      if (std::find(primary_cams.begin(), primary_cams.end(), cam) == primary_cams.end())
+        tracking_cameras.push_back(cam);
+    }
+  }
+  for (CameraId primary_cam_id : tracking_cameras) {
     const camera::ICameraModel& intrinsics = *rig_.intrinsics[primary_cam_id];
     auto selector = std::make_unique<SelectorStereo>(sof_settings.feature_selection_settings);
     mono_sof_.emplace_back(CreateMonoSOF(Implementation::kGPU, primary_cam_id, intrinsics, std::move(selector),
                                          feature_predictor, sof_settings));
 
+    if (std::find(primary_cams.begin(), primary_cams.end(), primary_cam_id) == primary_cams.end()) continue;
     const auto& secondary_cams = fid_.secondary_cameras(primary_cam_id);
 
     auto& tracker_from_secondary_cam = secondary_from_primary_sof_[primary_cam_id];

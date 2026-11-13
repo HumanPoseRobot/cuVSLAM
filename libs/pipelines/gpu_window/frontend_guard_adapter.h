@@ -4,6 +4,7 @@
 #include "imu/imu_sba_problem.h"
 #include "common/log.h"
 #include <set>
+#include <string>
 namespace cuvslam::pipelines::frontend_guard {
 inline bool propagate(const sba_imu::Pose&left,sba_imu::Pose&pred){
  Matrix P;if(!inverse(left.info.cast<double>(),P))return false;const auto&pi=left.preintegration;
@@ -15,11 +16,11 @@ inline bool propagate(const sba_imu::Pose&left,sba_imu::Pose&pred){
 }
 template<class Landmarks>
 inline bool validate(const imu::ImuCalibration&cal,const camera::Rig&rig,const Landmarks&landmarks,const std::vector<camera::Observation>&observations,const sba_imu::Pose&prediction,const sba_imu::Pose&candidate,int required,double dt,int64_t time_ns,const char*source,bool degraded=false,bool multi_frame=false){
- Quality quality;int pixel2_inliers=0;std::array<int,4>counts{};std::array<Eigen::Vector2d,4> lo,hi;for(int i=0;i<4;++i){lo[i].setConstant(1e30);hi[i].setConstant(-1e30);}std::set<TrackId>unique;
+ Quality quality;int pixel2_inliers=0;std::array<int,camera::Rig::kMaxCameras>counts{};std::array<Eigen::Vector2d,camera::Rig::kMaxCameras> lo,hi;for(int i=0;i<rig.num_cameras;++i){lo[i].setConstant(1e30);hi[i].setConstant(-1e30);}std::set<TrackId>unique;
  bool finite=candidate.w_from_imu.matrix().allFinite()&&candidate.velocity.allFinite()&&candidate.gyro_bias.allFinite()&&candidate.acc_bias.allFinite()&&candidate.info.allFinite();
  if(finite){
   const Isometry3T corrected=cal.rig_from_imu()*candidate.w_from_imu.inverse();
-  for(const auto&o:observations){auto it=landmarks.find(o.id);if(it==landmarks.end()||o.cam_id>=rig.num_cameras||o.cam_id>=4)continue;++quality.total;const Vector3T pc=rig.camera_from_rig[o.cam_id]*corrected*it->second;if(!pc.allFinite()||pc.z()<=.05f)continue;const Vector2T error=(pc.hnormalized()-o.xy).cwiseProduct(rig.intrinsics[o.cam_id]->getFocal());if(!error.allFinite())continue;
+  for(const auto&o:observations){auto it=landmarks.find(o.id);if(it==landmarks.end()||o.cam_id>=rig.num_cameras)continue;++quality.total;const Vector3T pc=rig.camera_from_rig[o.cam_id]*corrected*it->second;if(!pc.allFinite()||pc.z()<=.05f)continue;const Vector2T error=(pc.hnormalized()-o.xy).cwiseProduct(rig.intrinsics[o.cam_id]->getFocal());if(!error.allFinite())continue;
        if(error.norm()<=2.f)++pixel2_inliers;
        const Eigen::Vector2d normalized=(pc.hnormalized()-o.xy).template cast<double>();
        const Eigen::Matrix2d information=9.*o.xy_info.template cast<double>();
@@ -34,6 +35,11 @@ inline bool validate(const imu::ImuCalibration&cal,const camera::Rig&rig,const L
  if(finite&&inverse(prediction.info.cast<double>(),P)&&inverse(candidate.info.cast<double>(),C)){
   Eigen::Matrix3d rotation=prediction.w_from_imu.linear().cast<double>().transpose()*candidate.w_from_imu.linear().cast<double>();Eigen::AngleAxisd aa(rotation);delta.segment<3>(0)=aa.angle()*aa.axis();delta.segment<3>(3)=prediction.w_from_imu.linear().cast<double>().transpose()*(candidate.w_from_imu.translation()-prediction.w_from_imu.translation()).cast<double>();delta.segment<3>(6)=(candidate.velocity-prediction.velocity).cast<double>();delta.segment<3>(9)=(candidate.gyro_bias-prediction.gyro_bias).cast<double>();delta.segment<3>(12)=(candidate.acc_bias-prediction.acc_bias).cast<double>();Matrix T=Matrix::Identity();T.block<3,3>(0,0)=rotation;T.block<3,3>(3,3)=rotation;C=T*C*T.transpose();decision=assess(quality,required,delta,P,C,dt,degraded,multi_frame);
  }else{decision.reasons=Invalid;decision.score.fill(std::numeric_limits<double>::infinity());}
- TraceMessage("FRONTEND_GATE t=%lld source=%s accept=%d reasons=%u total=%d inliers=%d unique=%d cameras=%d pixel2=%d counts=%d,%d,%d,%d dp=%.9g dv=%.9g dbg=%.9g dba=%.9g scores=%.9g,%.9g,%.9g,%.9g,%.9g",(long long)time_ns,source,int(decision.accepted),decision.reasons,quality.total,quality.inliers,quality.unique,quality.supported_cameras,pixel2_inliers,counts[0],counts[1],counts[2],counts[3],delta.segment<3>(3).norm(),delta.segment<3>(6).norm(),delta.segment<3>(9).norm(),delta.segment<3>(12).norm(),decision.score[0],decision.score[1],decision.score[2],decision.score[3],decision.score[4]);return decision.accepted;
+ std::string camera_counts;
+ for (int cam = 0; cam < rig.num_cameras; ++cam) {
+   if (cam != 0) camera_counts += ',';
+   camera_counts += std::to_string(counts[cam]);
+ }
+ TraceMessage("FRONTEND_GATE t=%lld source=%s accept=%d reasons=%u total=%d inliers=%d unique=%d cameras=%d pixel2=%d counts=%s dp=%.9g dv=%.9g dbg=%.9g dba=%.9g scores=%.9g,%.9g,%.9g,%.9g,%.9g",(long long)time_ns,source,int(decision.accepted),decision.reasons,quality.total,quality.inliers,quality.unique,quality.supported_cameras,pixel2_inliers,camera_counts.c_str(),delta.segment<3>(3).norm(),delta.segment<3>(6).norm(),delta.segment<3>(9).norm(),delta.segment<3>(12).norm(),decision.score[0],decision.score[1],decision.score[2],decision.score[3],decision.score[4]);return decision.accepted;
 }
 }

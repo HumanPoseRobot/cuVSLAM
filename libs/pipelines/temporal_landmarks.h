@@ -90,7 +90,7 @@ public:
       int seen = 0, shared = 0, mapped = 0, stereo = 0;
       std::array<int, 5> outcome{};
     };
-    std::array<Stats, 4> stats{};
+    std::array<Stats, camera::Rig::kMaxCameras> stats{};
     for (const auto& o : obs) {
       auto& a = stats[o.cam_id];
       ++a.seen;
@@ -120,7 +120,7 @@ public:
         added.insert(o.id);
       }
     }
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < rig.num_cameras; ++i) {
       const auto& a = stats[i];
       TraceMessage(
           "CAM01_TRI t=%lld cam=%d seen=%d shared=%d mapped=%d stereo=%d few=%d parallax=%d depth=%d reproj=%d "
@@ -133,7 +133,7 @@ public:
 private:
   struct Snapshot {
     int64_t time;
-    std::array<std::unordered_map<TrackId, Ray>, 4> rays;
+    std::array<std::unordered_map<TrackId, Ray>, camera::Rig::kMaxCameras> rays;
   };
   std::deque<Snapshot> history_;
   static Ray make_ray(const camera::Rig& rig, const Isometry3T& pose, const camera::Observation& o) {
