@@ -85,11 +85,13 @@ public:
       Eigen::Map<const Matrix> j(e.visual_j.data() + 36 * z, 2, 18);
       Eigen::Map<const Eigen::Vector2d> r(e.visual.data() + 2 * z);
       double w = r.norm() > p.huber ? p.huber / r.norm() : 1.;
-      int k = 15 * v.node;
-      H.block(k, k, 15, 15).noalias() += w * j.leftCols(15).transpose() * j.leftCols(15);
-      g.segment(k, 15).noalias() += w * j.leftCols(15).transpose() * r;
       auto& pt = points[v.point];
-      pt.B.middleRows(k, 15).noalias() += w * j.leftCols(15).transpose() * j.rightCols(3);
+      if (v.node >= 0) {
+        int k = 15 * v.node;
+        H.block(k, k, 15, 15).noalias() += w * j.leftCols(15).transpose() * j.leftCols(15);
+        g.segment(k, 15).noalias() += w * j.leftCols(15).transpose() * r;
+        pt.B.middleRows(k, 15).noalias() += w * j.leftCols(15).transpose() * j.rightCols(3);
+      }
       pt.C.noalias() += w * j.rightCols(3).transpose() * j.rightCols(3);
       pt.g.noalias() += w * j.rightCols(3).transpose() * r;
     }
@@ -188,12 +190,20 @@ Evaluation EvaluateHost(const Problem& p, const std::vector<double>& x, bool jac
   }
   for (size_t i = 0; i < p.visuals.size(); ++i) {
     const auto& v = p.visuals[i];
-    double a[18];
-    std::copy_n(x.data() + 15 * v.node, 15, a);
+    double a[18] = {};
+    if (v.node >= 0) {
+      std::copy_n(x.data() + 15 * v.node, 15, a);
+    }
     std::copy_n(x.data() + n + 3 * v.point, 3, a + 15);
-    Linearize<2, 18>(
-        a, [&](auto* a, auto* b) { visual_res(v, p.nodes[v.node], p.points[v.point].data(), a, b); },
-        e.visual.data() + 2 * i, jacobian ? e.visual_j.data() + 36 * i : nullptr);
+    if (v.node < 0) {
+      Linearize<2, 18>(
+          a, [&](auto* a, auto* b) { fixed_visual_res(v, p.points[v.point].data(), a, b); },
+          e.visual.data() + 2 * i, jacobian ? e.visual_j.data() + 36 * i : nullptr);
+    } else {
+      Linearize<2, 18>(
+          a, [&](auto* a, auto* b) { visual_res(v, p.nodes[v.node], p.points[v.point].data(), a, b); },
+          e.visual.data() + 2 * i, jacobian ? e.visual_j.data() + 36 * i : nullptr);
+    }
   }
   return e;
 }
@@ -326,7 +336,7 @@ Problem LoadProblem(const char* path) {
   std::ifstream s(path, std::ios::binary);
   Header h;
   Read(s, h);
-  if (!s || h.magic != 0x4650363457494e31ULL || h.count < 2 || h.count > 6) {
+  if (!s || h.magic != 0x4650363457494e31ULL || h.count < 2 || h.count > Slots) {
     throw std::runtime_error("invalid snapshot");
   }
   Problem p;

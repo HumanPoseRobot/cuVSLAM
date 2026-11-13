@@ -77,5 +77,23 @@ WHD void visual_res(const Visual& o, const State& a, const double* point, const 
     r[i] = o.obs.sqrt_info[2 * i] * err[0] + o.obs.sqrt_info[2 * i + 1] * err[1];
   }
 }
+// Pose increment x[0:15] is ignored. x[15:18] is the point increment.
+template <class T>
+WHD void fixed_visual_res(const Visual& o, const double* point, const T* x, T* r) {
+  T dp[3], pi[3], pc[3];
+  for (int k = 0; k < 3; ++k) {
+    dp[k] = point[k] + x[15 + k] - o.fixed.p[k];
+  }
+  mtv(o.fixed.R, dp, pi);
+  mv(o.obs.Rci, pi, pc);
+  for (int k = 0; k < 3; ++k) {
+    pc[k] += o.obs.tci[k];
+  }
+  T z = pc[2] <= o.obs.min_depth ? T(o.obs.min_depth) : pc[2];
+  T err[2] = {pc[0] / z - o.obs.xy[0], pc[1] / z - o.obs.xy[1]};
+  for (int i = 0; i < 2; ++i) {
+    r[i] = o.obs.sqrt_info[2 * i] * err[0] + o.obs.sqrt_info[2 * i + 1] * err[1];
+  }
+}
 }  // namespace gpu_window
 #undef WHD

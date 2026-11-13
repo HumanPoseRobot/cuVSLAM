@@ -86,8 +86,11 @@ inline const char* invalid_problem(const Problem& p) {
     }
   }
   for (const auto& v : p.visuals) {
-    if (v.node < 0 || v.node >= p.count || v.point < 0 || size_t(v.point) >= p.points.size()) {
+    if (v.node < -1 || v.node >= p.count || v.point < 0 || size_t(v.point) >= p.points.size()) {
       return "visual_index";
+    }
+    if (v.node < 0 && !valid_state(v.fixed)) {
+      return "fixed_pose";
     }
     if (!valid_rotation(v.obs.Rci) || !finite_range(v.obs.tci) || !finite_range(v.obs.xy) ||
         !finite_range(v.obs.sqrt_info) || !std::isfinite(v.obs.min_depth) || v.obs.min_depth <= 0) {

@@ -22,6 +22,9 @@
 #include "imu/gyro_bias_nec.h"
 #include "imu/inertial_optimization.h"
 
+#include <cstdio>
+#include <cstring>
+
 namespace {
 
 using Mat93 = Eigen::Matrix<float, 9, 3>;
@@ -362,8 +365,8 @@ bool InertialOptimizer::LinearAlignment(std::vector<Pose>& poses, const Vector3T
 
   // Variables: [v_0, v_1, ..., v_{N-1}, g(3D), ba(3D)]  total: 3*N + 6
   int n_state = 3 * num_poses + 6;
-  Eigen::MatrixXf A = Eigen::MatrixXf::Zero(n_state, n_state);
-  Eigen::VectorXf b = Eigen::VectorXf::Zero(n_state);
+  Eigen::MatrixXd A = Eigen::MatrixXd::Zero(n_state, n_state);
+  Eigen::VectorXd b = Eigen::VectorXd::Zero(n_state);
 
   for (int i = 0; i < num_inertials; i++) {
     const Pose& pose_i = poses[i];
@@ -384,22 +387,22 @@ bool InertialOptimizer::LinearAlignment(std::vector<Pose>& poses, const Vector3T
     // Local 6x12 system over [v_i(0-2), v_j(3-5), g(6-8), ba(9-11)]
     // Position: -dt*v_i - 0.5*dt²*g - R_i*JPa*ba = R_i*dP(bg,0) - (p_j - p_i)
     // Velocity: -v_i + v_j - dt*g - R_i*JVa*ba   = R_i*dV(bg,0)
-    Eigen::Matrix<float, 6, 12> tmp_A = Eigen::Matrix<float, 6, 12>::Zero();
-    Eigen::Matrix<float, 6, 1> tmp_b;
+    Eigen::Matrix<double, 6, 12> tmp_A = Eigen::Matrix<double, 6, 12>::Zero();
+    Eigen::Matrix<double, 6, 1> tmp_b;
 
-    tmp_A.block<3, 3>(0, 0) = -dt * Matrix3T::Identity();
-    tmp_A.block<3, 3>(0, 6) = -0.5f * dt * dt * Matrix3T::Identity();
-    tmp_A.block<3, 3>(0, 9) = -R_i * preint.JPa;
-    tmp_b.segment<3>(0) = R_i * dP - (p_j - p_i);
+    tmp_A.block<3, 3>(0, 0) = (-dt * Matrix3T::Identity()).cast<double>();
+    tmp_A.block<3, 3>(0, 6) = (-0.5f * dt * dt * Matrix3T::Identity()).cast<double>();
+    tmp_A.block<3, 3>(0, 9) = (-R_i * preint.JPa).cast<double>();
+    tmp_b.segment<3>(0) = (R_i * dP - (p_j - p_i)).cast<double>();
 
-    tmp_A.block<3, 3>(3, 0) = -Matrix3T::Identity();
-    tmp_A.block<3, 3>(3, 3) = Matrix3T::Identity();
-    tmp_A.block<3, 3>(3, 6) = -dt * Matrix3T::Identity();
-    tmp_A.block<3, 3>(3, 9) = -R_i * preint.JVa;
-    tmp_b.segment<3>(3) = R_i * dV;
+    tmp_A.block<3, 3>(3, 0) = (-Matrix3T::Identity()).cast<double>();
+    tmp_A.block<3, 3>(3, 3) = (Matrix3T::Identity()).cast<double>();
+    tmp_A.block<3, 3>(3, 6) = (-dt * Matrix3T::Identity()).cast<double>();
+    tmp_A.block<3, 3>(3, 9) = (-R_i * preint.JVa).cast<double>();
+    tmp_b.segment<3>(3) = (R_i * dV).cast<double>();
 
-    Eigen::Matrix<float, 12, 12> r_A = tmp_A.transpose() * tmp_A;
-    Eigen::Matrix<float, 12, 1> r_b = tmp_A.transpose() * tmp_b;
+    Eigen::Matrix<double, 12, 12> r_A = tmp_A.transpose() * tmp_A;
+    Eigen::Matrix<double, 12, 1> r_b = tmp_A.transpose() * tmp_b;
 
     int vi = 3 * i;
     int vj = 3 * (i + 1);
@@ -433,32 +436,32 @@ bool InertialOptimizer::LinearAlignment(std::vector<Pose>& poses, const Vector3T
   }
   // Regularize acc_bias (prior added after scaling so it stays at physical units)
   const int bi = 3 * num_poses + 3;
-  A.block<3, 3>(bi, bi) += acc_prior_info;
+  A.block<3, 3>(bi, bi) += (acc_prior_info).cast<double>();
 
   // Scale for numerical stability (matching VINS-Mono convention).
   // Normal-equation entries carry dt^2..dt^4 factors (dt ~ 1e-2 s), clustering
   // around 1e-4..1e-8 and eating into float32's mantissa during LDLT. Lifting
   // both sides by 1000 shifts them into a better-conditioned range without
   // changing the solution. Same trick as VINS-Mono's LinearAlignment.
-  A *= 1000.f;
-  b *= 1000.f;
-  Eigen::VectorXf x = A.ldlt().solve(b);
+  A *= 1000.0;
+  b *= 1000.0;
+  Eigen::VectorXd x = A.ldlt().solve(b);
 
   if (!x.allFinite()) {
     TraceWarning("LinearAlignment: solver produced NaN/Inf, system is under-constrained");
     return false;
   }
 
-  const Vector3T g = x.segment<3>(3 * num_poses);
+  const Vector3T g = x.segment<3>(3 * num_poses).cast<float>();
 
   if (std::abs(g.norm() - GRAVITY_VALUE) > 1.0f) {
     return false;
   }
 
   for (int i = 0; i < num_poses; i++) {
-    poses[i].velocity = x.segment<3>(3 * i);
+    poses[i].velocity = x.segment<3>(3 * i).cast<float>();
   }
-  acc_bias = x.segment<3>(3 * num_poses + 3);
+  acc_bias = x.segment<3>(3 * num_poses + 3).cast<float>();
 
   Eigen::Quaternionf q = Eigen::Quaternionf::FromTwoVectors(default_gravity.normalized(), g.normalized());
   Rgravity = q.toRotationMatrix();
@@ -479,10 +482,10 @@ void InertialOptimizer::RefineGravity(std::vector<Pose>& poses, const Vector3T& 
   int n_state = 3 * num_poses + 5;
 
   for (int iter = 0; iter < 4; iter++) {
-    const Eigen::Matrix<float, 3, 2> lxly = TangentBasis(g0);
+    const Eigen::Matrix<double, 3, 2> lxly = TangentBasis(g0).cast<double>();
 
-    Eigen::MatrixXf A = Eigen::MatrixXf::Zero(n_state, n_state);
-    Eigen::VectorXf b = Eigen::VectorXf::Zero(n_state);
+    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(n_state, n_state);
+    Eigen::VectorXd b = Eigen::VectorXd::Zero(n_state);
 
     for (int i = 0; i < num_inertials; i++) {
       const Pose& pose_i = poses[i];
@@ -505,22 +508,22 @@ void InertialOptimizer::RefineGravity(std::vector<Pose>& poses, const Vector3T& 
       // Local 6x11 system over [v_i(0-2), v_j(3-5), w(6-7), delta_ba(8-10)]
       // Position: -dt*v_i - 0.5*dt²*lxly*w - R_i*JPa*delta_ba = R_i*dP(bg,ba) - (p_j-p_i) + 0.5*dt²*g0
       // Velocity: -v_i + v_j - dt*lxly*w - R_i*JVa*delta_ba   = R_i*dV(bg,ba) + dt*g0
-      Eigen::Matrix<float, 6, 11> tmp_A = Eigen::Matrix<float, 6, 11>::Zero();
-      Eigen::Matrix<float, 6, 1> tmp_b;
+      Eigen::Matrix<double, 6, 11> tmp_A = Eigen::Matrix<double, 6, 11>::Zero();
+      Eigen::Matrix<double, 6, 1> tmp_b;
 
-      tmp_A.block<3, 3>(0, 0) = -dt * Matrix3T::Identity();
-      tmp_A.block<3, 2>(0, 6) = -0.5f * dt * dt * lxly;
-      tmp_A.block<3, 3>(0, 8) = -R_i * preint.JPa;
-      tmp_b.segment<3>(0) = R_i * dP - (p_j - p_i) + 0.5f * dt * dt * g0;
+      tmp_A.block<3, 3>(0, 0) = (-dt * Matrix3T::Identity()).cast<double>();
+      tmp_A.block<3, 2>(0, 6) = (-0.5f * dt * dt * lxly).cast<double>();
+      tmp_A.block<3, 3>(0, 8) = (-R_i * preint.JPa).cast<double>();
+      tmp_b.segment<3>(0) = (R_i * dP - (p_j - p_i) + 0.5f * dt * dt * g0).cast<double>();
 
-      tmp_A.block<3, 3>(3, 0) = -Matrix3T::Identity();
-      tmp_A.block<3, 3>(3, 3) = Matrix3T::Identity();
-      tmp_A.block<3, 2>(3, 6) = -dt * lxly;
-      tmp_A.block<3, 3>(3, 8) = -R_i * preint.JVa;
-      tmp_b.segment<3>(3) = R_i * dV + dt * g0;
+      tmp_A.block<3, 3>(3, 0) = (-Matrix3T::Identity()).cast<double>();
+      tmp_A.block<3, 3>(3, 3) = (Matrix3T::Identity()).cast<double>();
+      tmp_A.block<3, 2>(3, 6) = (-dt * lxly).cast<double>();
+      tmp_A.block<3, 3>(3, 8) = (-R_i * preint.JVa).cast<double>();
+      tmp_b.segment<3>(3) = (R_i * dV + dt * g0).cast<double>();
 
-      Eigen::Matrix<float, 11, 11> r_A = tmp_A.transpose() * tmp_A;
-      Eigen::Matrix<float, 11, 1> r_b = tmp_A.transpose() * tmp_b;
+      Eigen::Matrix<double, 11, 11> r_A = tmp_A.transpose() * tmp_A;
+      Eigen::Matrix<double, 11, 1> r_b = tmp_A.transpose() * tmp_b;
 
       int vi = 3 * i;
       int vj = 3 * (i + 1);
@@ -556,12 +559,12 @@ void InertialOptimizer::RefineGravity(std::vector<Pose>& poses, const Vector3T& 
     // H contribution: prior (added after 1000x scaling, stays at physical units)
     // RHS contribution: -prior * acc_bias (anchors absolute bias toward zero)
     const int bi = 3 * num_poses + 2;
-    A.block<3, 3>(bi, bi) += acc_prior_info;
-    b.segment<3>(bi) -= acc_prior_info * acc_bias;
+    A.block<3, 3>(bi, bi) += (acc_prior_info).cast<double>();
+    b.segment<3>(bi) -= (acc_prior_info * acc_bias).cast<double>();
 
-    A *= 1000.f;
-    b *= 1000.f;
-    Eigen::VectorXf x = A.ldlt().solve(b);
+    A *= 1000.0;
+    b *= 1000.0;
+    Eigen::VectorXd x = A.ldlt().solve(b);
 
     if (!x.allFinite()) {
       TraceWarning("RefineGravity: solver produced NaN/Inf at iter %d, stopping refinement", iter);
@@ -569,20 +572,145 @@ void InertialOptimizer::RefineGravity(std::vector<Pose>& poses, const Vector3T& 
     }
 
     // Update gravity in tangent space, then re-normalize to GRAVITY_VALUE
-    Eigen::Vector2f dg = x.segment<2>(3 * num_poses);
-    g0 = (g0 + lxly * dg).normalized() * GRAVITY_VALUE;
+    const Eigen::Vector2d dg = x.segment<2>(3 * num_poses);
+    g0 = (g0 + (lxly * dg).cast<float>()).normalized() * GRAVITY_VALUE;
 
     // Accumulate acc_bias perturbation
-    acc_bias += x.segment<3>(3 * num_poses + 2);
+    acc_bias += x.segment<3>(3 * num_poses + 2).cast<float>();
 
     for (int i = 0; i < num_poses; i++) {
-      poses[i].velocity = x.segment<3>(3 * i);
+      poses[i].velocity = x.segment<3>(3 * i).cast<float>();
     }
   }
 
   Eigen::Quaternionf q = Eigen::Quaternionf::FromTwoVectors(default_gravity.normalized(), g0.normalized());
   Rgravity = q.toRotationMatrix();
 }
+
+
+namespace {
+
+bool EstimateStaticGravity(const std::vector<Pose>& poses, Vector3T& gravity) {
+  std::vector<Vector3T> samples;
+  for (const Pose& pose : poses) {
+    const Matrix3T R = pose.w_from_imu.linear();
+    for (const auto& m : pose.preintegration.measurements()) {
+      if (m.angular_velocity.norm() > 0.1f) continue;
+      if (std::abs(m.linear_acceleration.norm() - GRAVITY_VALUE) > 0.8f) continue;
+      samples.push_back(R * m.linear_acceleration);
+    }
+  }
+  if (samples.size() < 40) return false;
+  Vector3T mean = Vector3T::Zero();
+  for (const Vector3T& s : samples) mean += s;
+  mean /= static_cast<float>(samples.size());
+  float var = 0.f;
+  for (const Vector3T& s : samples) var += (s - mean).squaredNorm();
+  var /= static_cast<float>(samples.size());
+  if (std::sqrt(var) > 0.35f || mean.norm() < 1.f) return false;
+  gravity = -mean.normalized() * GRAVITY_VALUE;
+  return gravity.allFinite();
+}
+
+Eigen::Matrix<double, 3, 2> GravityTangent(const Vector3T& g) {
+  const Vector3T a = g.normalized();
+  const Vector3T tmp = std::abs(a.z()) < 0.9f ? Vector3T::UnitZ() : Vector3T::UnitX();
+  const Vector3T b = (tmp - a * a.dot(tmp)).normalized();
+  const Vector3T c = a.cross(b);
+  Eigen::Matrix<double, 3, 2> basis;
+  basis.col(0) = b.cast<double>();
+  basis.col(1) = c.cast<double>();
+  return basis;
+}
+
+bool MapRefineGravity(std::vector<Pose>& poses, const Vector3T& gyro_bias, Matrix3T& Rgravity, Vector3T& acc_bias,
+                      const Vector3T& default_gravity) {
+  const int n = static_cast<int>(poses.size());
+  if (n < 2) return false;
+  Vector3T g = Rgravity * default_gravity;
+  if (!g.allFinite() || g.norm() < 1.f) return false;
+  g = g.normalized() * GRAVITY_VALUE;
+  for (int iter = 0; iter < 5; ++iter) {
+    const int nstate = 3 * n + 5;
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(nstate, nstate);
+    Eigen::VectorXd grad = Eigen::VectorXd::Zero(nstate);
+    const Eigen::Matrix<double, 3, 2> basis = GravityTangent(g);
+    int used = 0;
+    for (int i = 0; i + 1 < n; ++i) {
+      const auto& pre = poses[i].preintegration;
+      if (pre.empty()) continue;
+      const float dt = pre.GetDeltaT_s();
+      if (dt < 1e-6f) continue;
+      const Matrix3T R = poses[i].w_from_imu.linear();
+      const Vector3T dP = pre.GetDeltaPosition(gyro_bias, acc_bias);
+      const Vector3T dV = pre.GetDeltaVelocity(gyro_bias, acc_bias);
+      const Vector3T pi = poses[i].w_from_imu.translation();
+      const Vector3T pj = poses[i + 1].w_from_imu.translation();
+      Eigen::Matrix<double, 6, 1> residual;
+      residual.segment<3>(0) =
+          (pj - pi - poses[i].velocity * dt - 0.5f * g * dt * dt - R * dP).cast<double>();
+      residual.segment<3>(3) = (poses[i + 1].velocity - poses[i].velocity - g * dt - R * dV).cast<double>();
+      Eigen::Matrix<double, 6, 11> J = Eigen::Matrix<double, 6, 11>::Zero();
+      J.block<3, 3>(0, 0) = (-dt * Matrix3T::Identity()).cast<double>();
+      J.block<3, 3>(3, 0) = (-Matrix3T::Identity()).cast<double>();
+      J.block<3, 3>(3, 3) = Matrix3T::Identity().cast<double>();
+      J.block<3, 2>(0, 6) = -0.5 * dt * dt * basis;
+      J.block<3, 2>(3, 6) = -static_cast<double>(dt) * basis;
+      J.block<3, 3>(0, 8) = (-R * pre.JPa).cast<double>();
+      J.block<3, 3>(3, 8) = (-R * pre.JVa).cast<double>();
+      Eigen::Matrix<double, 6, 6> weight = Eigen::Matrix<double, 6, 6>::Identity() * 100.0;
+      const Matrix9T cov = pre.cov_matrix_;
+      if (cov.allFinite() && cov.norm() > 0.f) {
+        Eigen::Matrix<double, 6, 6> body = Eigen::Matrix<double, 6, 6>::Zero();
+        body.block<3, 3>(0, 0) = cov.block<3, 3>(6, 6).cast<double>();
+        body.block<3, 3>(0, 3) = cov.block<3, 3>(6, 3).cast<double>();
+        body.block<3, 3>(3, 0) = cov.block<3, 3>(3, 6).cast<double>();
+        body.block<3, 3>(3, 3) = cov.block<3, 3>(3, 3).cast<double>();
+        Eigen::Matrix<double, 6, 6> rotation = Eigen::Matrix<double, 6, 6>::Zero();
+        rotation.block<3, 3>(0, 0) = R.cast<double>();
+        rotation.block<3, 3>(3, 3) = R.cast<double>();
+        body = rotation * body * rotation.transpose();
+        body.diagonal().array() += 1e-6;
+        Eigen::LDLT<Eigen::Matrix<double, 6, 6>> cov_ldlt(body);
+        if (cov_ldlt.info() == Eigen::Success && cov_ldlt.isPositive()) {
+          weight = cov_ldlt.solve(Eigen::Matrix<double, 6, 6>::Identity());
+        }
+      }
+      const Eigen::Matrix<double, 11, 11> local_h = J.transpose() * weight * J;
+      const Eigen::Matrix<double, 11, 1> local_g = J.transpose() * weight * residual;
+      const int index[4] = {3 * i, 3 * (i + 1), 3 * n, 3 * n + 2};
+      const int width[4] = {3, 3, 2, 3};
+      const int local[4] = {0, 3, 6, 8};
+      for (int a = 0; a < 4; ++a) {
+        grad.segment(index[a], width[a]) += local_g.segment(local[a], width[a]);
+        for (int b = 0; b < 4; ++b) {
+          H.block(index[a], index[b], width[a], width[b]) +=
+              local_h.block(local[a], local[b], width[a], width[b]);
+        }
+      }
+      ++used;
+    }
+    if (used < 2) return false;
+    H.block<2, 2>(3 * n, 3 * n) += Eigen::Matrix2d::Identity();
+    H.block<3, 3>(3 * n + 2, 3 * n + 2) += Eigen::Matrix3d::Identity() * 25.0;
+    grad.segment<3>(3 * n + 2) += 25.0 * acc_bias.cast<double>();
+    Eigen::LDLT<Eigen::MatrixXd> decomposition(H);
+    if (decomposition.info() != Eigen::Success || !decomposition.isPositive()) return false;
+    const Eigen::VectorXd step = -decomposition.solve(grad);
+    if (!step.allFinite()) return false;
+    for (int i = 0; i < n; ++i) poses[i].velocity += step.segment<3>(3 * i).cast<float>();
+    g = (g.cast<double>() + basis * step.segment<2>(3 * n)).cast<float>();
+    if (!g.allFinite() || g.norm() < 1.f) return false;
+    g = g.normalized() * GRAVITY_VALUE;
+    acc_bias += step.segment<3>(3 * n + 2).cast<float>();
+    if (acc_bias.norm() > 1.f) acc_bias *= 1.f / acc_bias.norm();
+  }
+  const Eigen::Quaternionf q = Eigen::Quaternionf::FromTwoVectors(default_gravity.normalized(), g.normalized());
+  Rgravity = q.toRotationMatrix();
+  return true;
+}
+
+}  // namespace
 
 bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::ImuCalibration& calib,
                                           Matrix3T& Rgravity, float robustifier) {
@@ -602,6 +730,39 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     poses[i].preintegration.Reintegrate(calib);
   }
 
+  // v1.4_gravity: reference axis from samples whose specific force is near g.
+  // LinearAlignment still solves gravity as a free vector; this sets the gauge
+  // used by RefineGravity and the fallback direction.
+  {
+    auto accumulate = [&](bool stationary_only, Vector3T& sum, int& count) {
+      for (size_t i = 0; i + 1 < poses.size(); ++i) {
+        const Matrix3T R_world = poses[i].w_from_imu.linear();
+        for (const auto& m : poses[i].preintegration.measurements()) {
+          if (stationary_only && std::abs(m.linear_acceleration.norm() - GRAVITY_VALUE) > 0.5f) {
+            continue;
+          }
+          sum += R_world * m.linear_acceleration;
+          ++count;
+        }
+      }
+    };
+    Vector3T specific_force = Vector3T::Zero();
+    int samples = 0;
+    accumulate(true, specific_force, samples);
+    if (samples < 50) {
+      specific_force.setZero();
+      samples = 0;
+      accumulate(false, specific_force, samples);
+    }
+    if (samples > 0) {
+      specific_force /= static_cast<float>(samples);
+      const Vector3T g_ref = -specific_force;
+      if (g_ref.norm() > 1.f) {
+        default_gravity = g_ref.normalized() * GRAVITY_VALUE;
+      }
+    }
+  }
+
   Vector3T acc_bias = Vector3T::Zero();
   bool linear_ok = LinearAlignment(poses, gyro_bias, Rgravity, acc_bias);
   if (!linear_ok) {
@@ -612,6 +773,24 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     return false;
   }
   RefineGravity(poses, gyro_bias, Rgravity, acc_bias);
+  const char* gravity_scheme = std::getenv("CUVSLAM_GRAVITY_SCHEME");
+  Vector3T static_gravity = Vector3T::Zero();
+  const bool have_static = EstimateStaticGravity(poses, static_gravity);
+  const bool scheme_static = gravity_scheme && std::strcmp(gravity_scheme, "static") == 0;
+  const bool scheme_map = gravity_scheme && std::strcmp(gravity_scheme, "map") == 0;
+  auto commit_scheme = [&]() {
+    if (!(scheme_static && have_static)) return;
+    default_gravity = static_gravity;
+    Rgravity.setIdentity();
+    std::fprintf(stderr, "GRAVITY_SCHEME static commit %.4f %.4f %.4f\n", static_gravity.x(), static_gravity.y(),
+                 static_gravity.z());
+  };
+  if (scheme_map) {
+    const bool mapped = MapRefineGravity(poses, gyro_bias, Rgravity, acc_bias, default_gravity);
+    std::fprintf(stderr, "GRAVITY_SCHEME map %s\n", mapped ? "commit" : "rejected");
+  } else if (scheme_static && !have_static) {
+    std::fprintf(stderr, "GRAVITY_SCHEME static absent\n");
+  }
 
   Eigen::MatrixXf hessian;
   // 3 - for each velocity in each pose, 2 - for gravity, 3 - for gyro bias, 3 - for acc bias
@@ -627,6 +806,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
       p.gyro_bias = gyro_bias;
       p.acc_bias = acc_bias;
     }
+    commit_scheme();
     return true;
   }
   auto current_cost = initial_cost;
@@ -729,7 +909,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     p.gyro_bias = gyro_bias;
     p.acc_bias = acc_bias;
   }
-
+  commit_scheme();
   return true;
 }
 

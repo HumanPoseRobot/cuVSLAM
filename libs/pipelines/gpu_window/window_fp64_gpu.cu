@@ -96,10 +96,17 @@ __global__ void VisualEval(int n, const State* ns, const double* points, const V
   }
   const auto& v = vs[z];
   gpu_vi::Jet a[18], b[2];
-  for (int k = 0; k < 18; ++k) {
-    a[k] = {x[k < 15 ? 15 * v.node + k : n + 3 * v.point + k - 15], k == c ? 1. : 0.};
+  if (v.node < 0) {
+    for (int k = 0; k < 18; ++k) {
+      a[k] = {k < 15 ? 0. : x[n + 3 * v.point + k - 15], k == c ? 1. : 0.};
+    }
+    fixed_visual_res(v, points + 3 * v.point, a, b);
+  } else {
+    for (int k = 0; k < 18; ++k) {
+      a[k] = {x[k < 15 ? 15 * v.node + k : n + 3 * v.point + k - 15], k == c ? 1. : 0.};
+    }
+    visual_res(v, ns[v.node], points + 3 * v.point, a, b);
   }
-  visual_res(v, ns[v.node], points + 3 * v.point, a, b);
   for (int k = 0; k < 2; ++k) {
     if (c < 0) {
       r[2 * z + k] = b[k].v;

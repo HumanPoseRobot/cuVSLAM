@@ -1,3 +1,4 @@
+#include <cstdlib>
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -276,6 +277,10 @@ bool AsyncSlam::GetPosesForAllFrames(std::map<uint64_t, storage::Isometry3<float
 
     Isometry3T m;
     if (slam_->CalcFramePose(track_data.end_frame_id, m)) {
+      if (std::getenv("CUVSLAM_PGO_AUDIT")) {
+        TraceMessage("PGO_EXPORT t=%llu vo_anchor=%llu", (unsigned long long)timestamp_ns,
+                     (unsigned long long)track_data.end_frame_id);
+      }
       m = m * track_data.from_keyframe;
       Isometry3T pose = m;
       frames[timestamp_ns] = pose;
@@ -497,6 +502,10 @@ void AsyncSlam::ProcessInput() {
         // TODO: ? optimize_options.keyframes_in_sight = loop_closure_status.keyframes_in_sight;
         std::lock_guard slam_guard(slam_mutex_);
 
+        if (std::getenv("CUVSLAM_PGO_AUDIT")) {
+          TraceMessage("PGO_BEGIN t=%llu frame=%llu", (unsigned long long)timestamp_ns,
+                       (unsigned long long)frame_id);
+        }
         optimization_happens = slam_->OptimizePoseGraph(options_.planar_constraints);
       }
       if (optimization_happens) {

@@ -41,7 +41,9 @@ struct StateMachineSettings {
   // Period at which gravity is re-estimated once the SM is in the Ok state. Set to a very large
   // value (e.g. the default 5e12 = ~83 min) to effectively disable periodic re-estimation; gravity
   // is then estimated once at boot only.
-  int64_t gravity_update_period_ns = 5e12;
+  // v1.4_gravity: 60s. v1.33 kept 5e12 (~83 min, once per run).
+  // v1.4 keeps the initializer, then leaves gravity fixed. A 60s full re-init rewrote velocity.
+  int64_t gravity_update_period_ns = 5'000'000'000'000;
 };
 
 // Three-state machine driving IMU initialization (gravity / bias / velocity estimation).

@@ -53,11 +53,18 @@ Evaluation EvaluateHost(const Problem& p, const Result& r, bool jacobian) {
   }
   for (size_t i = 0; i < p.visuals.size(); ++i) {
     const auto& v = p.visuals[i];
-    float x[18];
-    std::copy_n(r.x.data() + 15 * v.node, 15, x);
+    float x[18] = {};
+    if (v.node >= 0) {
+      std::copy_n(r.x.data() + 15 * v.node, 15, x);
+    }
     std::copy_n(r.points.data() + 3 * v.point, 3, x + 15);
-    linearize<2, 18>(x, [&](auto* a, auto* b) { visual_res(v, p.nodes[v.node], p.points[v.point].data(), a, b); },
-                      out.visual.data() + 2 * i, jacobian ? out.visual_j.data() + 36 * i : nullptr);
+    if (v.node < 0) {
+      linearize<2, 18>(x, [&](auto* a, auto* b) { fixed_visual_res(v, p.points[v.point].data(), a, b); },
+                        out.visual.data() + 2 * i, jacobian ? out.visual_j.data() + 36 * i : nullptr);
+    } else {
+      linearize<2, 18>(x, [&](auto* a, auto* b) { visual_res(v, p.nodes[v.node], p.points[v.point].data(), a, b); },
+                        out.visual.data() + 2 * i, jacobian ? out.visual_j.data() + 36 * i : nullptr);
+    }
   }
   const int n = p.count * 15;
   Eigen::Map<const Eigen::Matrix<double, Dim, Dim, Eigen::RowMajor>> weights(p.W.data());

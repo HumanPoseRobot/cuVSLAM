@@ -1,6 +1,8 @@
 #include "window_backend.h"
 #include "window_commit_validation.h"
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -34,7 +36,16 @@ using Clock = std::chrono::steady_clock;
 double elapsed(Clock::time_point start) {
   return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
 }
+bool anchor_enabled() {
+  const char* value = std::getenv("CUVSLAM_GRAVITY_ANCHOR");
+  return value && std::strcmp(value, "1") == 0;
+}
 int window_limit() {
+  // Navigation kernels launch 128 threads and use one for the right-hand side,
+  // so eight keyframes (120 states) still fit. Frozen cameras do not consume those slots.
+  if (anchor_enabled()) {
+    return Slots;
+  }
   const char* value = std::getenv("CUVSLAM_WINDOW_SIZE");
   if (value && std::strcmp(value, "3") == 0) {
     return 3;
@@ -111,13 +122,109 @@ struct Node {
   Pose pose;
   std::vector<camera::Observation> observations;
 };
+struct FixedView {
+  int64_t t = 0;
+  gpu_window::State pose;
+  std::vector<camera::Observation> observations;
+};
 struct Graph {
   std::vector<Node> nodes;
+  std::vector<FixedView> fixed;
   std::map<TrackId, Vector3T> points;
   std::array<gpu_window::State, Slots> anchors{};
   WMatrix W = WMatrix::Zero(Dim, Dim);
   WVector c = WVector::Zero(Dim);
 };
+constexpr size_t kMaxFixed = 16;
+
+int shared_tracks(const std::vector<camera::Observation>& obs, const std::set<TrackId>& live) {
+  std::set<TrackId> seen;
+  int count = 0;
+  for (const auto& o : obs) {
+    if (live.count(o.id) && seen.insert(o.id).second) {
+      ++count;
+    }
+  }
+  return count;
+}
+void trim_fixed(Graph& g) {
+  while (g.fixed.size() > kMaxFixed) {
+    std::set<TrackId> live;
+    for (const auto& node : g.nodes) {
+      for (const auto& o : node.observations) {
+        live.insert(o.id);
+      }
+    }
+    auto worst = g.fixed.begin();
+    int worst_score = shared_tracks(worst->observations, live);
+    for (auto it = g.fixed.begin(); it != g.fixed.end(); ++it) {
+      const int score = shared_tracks(it->observations, live);
+      if (score < worst_score || (score == worst_score && it->t < worst->t)) {
+        worst = it;
+        worst_score = score;
+      }
+    }
+    g.fixed.erase(worst);
+  }
+}
+template <class SubMap>
+void reseed_fixed(Graph& g, const SubMap& sub, const imu::ImuCalibration& cal) {
+  if (!anchor_enabled() || g.nodes.empty() || sub.consecutive_keyframes.size() != sub.landmark_and_obs.size()) {
+    return;
+  }
+  std::set<int64_t> have;
+  for (const auto& node : g.nodes) {
+    have.insert(node.t);
+  }
+  for (const auto& view : g.fixed) {
+    have.insert(view.t);
+  }
+  std::set<TrackId> live;
+  for (const auto& node : g.nodes) {
+    for (const auto& o : node.observations) {
+      live.insert(o.id);
+    }
+  }
+  const size_t before = g.fixed.size();
+  for (size_t i = 0; i < sub.consecutive_keyframes.size(); ++i) {
+    const auto kf = sub.consecutive_keyframes[i].keyframe;
+    if (!kf || have.count(kf->time_ns())) {
+      continue;
+    }
+    const int64_t stamp = kf->time_ns();
+    FixedView view;
+    const auto state = kf->get_state();
+    Pose pose;
+    pose.w_from_imu = state.rig_from_w.inverse() * cal.rig_from_imu();
+    pose.velocity = state.velocity;
+    pose.gyro_bias = state.gyro_bias;
+    pose.acc_bias = state.acc_bias;
+    view.t = stamp;
+    view.pose = pack_state(pose);
+    for (const auto& entry : sub.landmark_and_obs[i]) {
+      const auto point = entry.landmark->get_pose();
+      if (!point) {
+        continue;
+      }
+      for (const auto& o : entry.observations) {
+        if (!live.count(o.id)) {
+          continue;
+        }
+        view.observations.push_back(o);
+        g.points.emplace(o.id, *point);
+      }
+    }
+    if (shared_tracks(view.observations, live) < 8) {
+      continue;
+    }
+    g.fixed.push_back(std::move(view));
+    have.insert(stamp);
+  }
+  trim_fixed(g);
+  if (g.fixed.size() != before) {
+    std::fprintf(stderr, "GRAVITY_ANCHOR reseed fixed=%zu\n", g.fixed.size());
+  }
+}
 struct MapSupport {
   int before = 0;
   int after = 0;
@@ -247,6 +354,13 @@ WinProblem pack(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig
       ++counts[o.id];
     }
   }
+  for (auto& view : g.fixed) {
+    for (auto& o : view.observations) {
+      if (g.points.count(o.id)) {
+        ++counts[o.id];
+      }
+    }
+  }
   std::map<TrackId, int> index;
   for (auto& kv : g.points) {
     if (counts[kv.first] >= 2) {
@@ -268,6 +382,36 @@ WinProblem pack(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig
       auto ci = Isometry3T(rig.camera_from_rig[o.cam_id] * cal.rig_from_imu());
       copy_matrix(v.obs.Rci, ci.linear());
       copy_matrix(v.obs.tci, ci.translation());
+      whiten<2>(v.obs.sqrt_info, 9. * o.xy_info.template cast<double>());
+      v.obs.min_depth = .05;
+      p.visuals.push_back(v);
+    }
+  }
+  for (auto& view : g.fixed) {
+    Matrix3T rotation;
+    for (int row = 0; row < 3; ++row) {
+      for (int col = 0; col < 3; ++col) {
+        rotation(row, col) = view.pose.R[3 * row + col];
+      }
+    }
+    const Vector3T translation(view.pose.p[0], view.pose.p[1], view.pose.p[2]);
+    for (auto& o : view.observations) {
+      auto it = index.find(o.id);
+      if (it == index.end() || o.cam_id >= rig.num_cameras || !g.points.count(o.id)) {
+        continue;
+      }
+      const Isometry3T camera(rig.camera_from_rig[o.cam_id] * cal.rig_from_imu());
+      const Vector3T pc = camera.linear() * (rotation.transpose() * (g.points[o.id] - translation)) + camera.translation();
+      if (!pc.allFinite() || pc.z() <= .05f) {
+        continue;
+      }
+      Visual v;
+      v.node = -1;
+      v.point = it->second;
+      v.fixed = view.pose;
+      copy_matrix(v.obs.xy, o.xy);
+      copy_matrix(v.obs.Rci, camera.linear());
+      copy_matrix(v.obs.tci, camera.translation());
       whiten<2>(v.obs.sqrt_info, 9. * o.xy_info.template cast<double>());
       v.obs.min_depth = .05;
       p.visuals.push_back(v);
@@ -310,13 +454,29 @@ WinProblem pack(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig
     d.dt = pi.dT_s;
     Matrix9T inf;
     pi.InfoMatrix(inf);
-    whiten<9>(d.imu_sqrt, .002 * inf.cast<double>());
+    Eigen::Matrix<double, 9, 9> scaled = inf.cast<double>();
+    double gyro_rw = 0.002;
+    double acc_rw = 0.002;
+    if (anchor_enabled()) {
+      // Rotation stays at full preintegration weight. Position and velocity
+      // drop to 0.05 so a fixed view can update velocity through (\u0394p)/dt.
+      constexpr double kTrans = 0.05;
+      Eigen::Matrix<double, 9, 9> S = Eigen::Matrix<double, 9, 9>::Identity();
+      S.block<3, 3>(3, 3) *= std::sqrt(kTrans);
+      S.block<3, 3>(6, 6) *= std::sqrt(kTrans);
+      scaled = S * scaled * S;
+      gyro_rw = 1.0;
+      acc_rw = kTrans;
+    } else {
+      scaled *= 0.002;
+    }
+    whiten<9>(d.imu_sqrt, scaled);
     Matrix3T bg, ba;
     pi.InfoGyroRWMatrix(bg);
     pi.InfoAccRWMatrix(ba);
     Eigen::Matrix<double, 6, 6> rw = Eigen::Matrix<double, 6, 6>::Zero();
-    rw.topLeftCorner<3, 3>() = .002 * bg.cast<double>();
-    rw.bottomRightCorner<3, 3>() = .002 * ba.cast<double>();
+    rw.topLeftCorner<3, 3>() = gyro_rw * bg.cast<double>();
+    rw.bottomRightCorner<3, 3>() = acc_rw * ba.cast<double>();
     whiten<6>(e.rw, rw);
     p.edges.push_back(e);
   }
@@ -343,6 +503,15 @@ double cost(const WinEvaluation& e, double huber) {
 bool prepare_retained(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig, const Vector3T& gravity,
                       int iterations, double huber, int64_t t) {
   if (g.nodes.size() == static_cast<size_t>(window_limit())) {
+    FixedView frozen;
+    const bool anchoring = anchor_enabled();
+    if (anchoring) {
+      // Keep this pose as a visual anchor. Its pixels must not also enter the marginal prior.
+      frozen.t = g.nodes.front().t;
+      frozen.pose = pack_state(g.nodes.front().pose);
+      frozen.observations = g.nodes.front().observations;
+      g.nodes.front().observations.clear();
+    }
     std::vector<TrackId> ids;
     auto p = pack(g, cal, rig, gravity, iterations, huber, ids);
     WinResult zero;
@@ -368,17 +537,47 @@ bool prepare_retained(Graph& g, const imu::ImuCalibration& cal, const camera::Ri
     const double marginal_ms = elapsed(marginal_start);
     TraceMessage("SCALE_MARG t=%lld states=%d points=%zu point_ms=%.6f marginal_ms=%.6f", (long long)t, p.count,
                  ids.size(), point_ms, marginal_ms);
-    std::set<TrackId> remove;
-    for (auto& o : g.nodes.front().observations) {
-      remove.insert(o.id);
-    }
-    g.nodes.erase(g.nodes.begin());
-    for (auto& node : g.nodes) {
-      auto& v = node.observations;
-      v.erase(std::remove_if(v.begin(), v.end(), [&](auto& o) { return remove.count(o.id); }), v.end());
-    }
-    for (auto id : remove) {
-      g.points.erase(id);
+    if (anchoring) {
+      g.nodes.erase(g.nodes.begin());
+      if (!frozen.observations.empty()) {
+        g.fixed.push_back(std::move(frozen));
+      }
+      trim_fixed(g);
+      std::set<TrackId> used;
+      for (const auto& node : g.nodes) {
+        for (const auto& o : node.observations) {
+          used.insert(o.id);
+        }
+      }
+      for (const auto& view : g.fixed) {
+        for (const auto& o : view.observations) {
+          used.insert(o.id);
+        }
+      }
+      for (auto it = g.points.begin(); it != g.points.end();) {
+        if (!used.count(it->first)) {
+          it = g.points.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      static int freezes = 0;
+      if (freezes++ % 20 == 0) {
+        std::fprintf(stderr, "GRAVITY_ANCHOR freeze fixed=%zu points=%zu\n", g.fixed.size(), g.points.size());
+      }
+    } else {
+      std::set<TrackId> remove;
+      for (auto& o : g.nodes.front().observations) {
+        remove.insert(o.id);
+      }
+      g.nodes.erase(g.nodes.begin());
+      for (auto& node : g.nodes) {
+        auto& v = node.observations;
+        v.erase(std::remove_if(v.begin(), v.end(), [&](auto& o) { return remove.count(o.id); }), v.end());
+      }
+      for (auto id : remove) {
+        g.points.erase(id);
+      }
     }
     g.W.setZero();
     g.c.setZero();
@@ -387,8 +586,8 @@ bool prepare_retained(Graph& g, const imu::ImuCalibration& cal, const camera::Ri
     for (int i = 0; i < p.count - 1; ++i) {
       g.anchors[i] = pack_state(g.nodes[i].pose);
     }
-    TraceMessage("WINDOW_MARG t=%lld retained=%zu retired_points=%zu prior_norm=%.9g linear_norm=%.9g", (long long)t,
-                 g.nodes.size(), remove.size(), g.W.norm(), g.c.norm());
+    TraceMessage("WINDOW_MARG t=%lld retained=%zu points=%zu fixed=%zu prior_norm=%.9g linear_norm=%.9g", (long long)t,
+                 g.nodes.size(), g.points.size(), g.fixed.size(), g.W.norm(), g.c.norm());
   }
   return g.W.allFinite() && g.c.allFinite();
 }
@@ -445,8 +644,15 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
     return false;
   }
   if (!d.active.nodes.empty() && (d.gravity - gravity).norm() > 1e-4) {
-    reset();
-    return solve(input, result);
+    const char* gravity_scheme = std::getenv("CUVSLAM_GRAVITY_SCHEME");
+    const float alignment = d.gravity.normalized().dot(gravity.normalized());
+    const bool small_tangent =
+        gravity_scheme && std::strcmp(gravity_scheme, "tangent") == 0 && alignment > 0.9993908f;
+    if (!small_tangent) {
+      reset();
+      return solve(input, result);
+    }
+    d.gravity = gravity;
   }
   if (!d.active.nodes.empty()) {
     auto recent = map.get_recent_submap(20);
@@ -521,6 +727,9 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
     WVector diag(15);
     diag << 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 25, 25, 25, 1e4, 1e4, 1e4, 25, 25, 25;
     d.active.W.topLeftCorner(15, 15) = diag.cwiseSqrt().asDiagonal();
+    if (anchor_enabled()) {
+      reseed_fixed(d.active, map.get_recent_submap(20), cal);
+    }
   }
   Graph g = d.active;
   auto& last = g.nodes.back();

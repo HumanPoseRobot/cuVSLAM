@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <string_view>
 #include <stdexcept>
@@ -80,7 +81,8 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
 
 // Prior in the solver's body rotation/translation, world velocity, and IMU bias coordinates.
 // Re-seed after visual bootstrap or an external keyframe correction without reusing stale cross terms.
-void seed_joint_prior(sba_imu::Pose& pose) {
+void seed_joint_prior(sba_imu::Pose& pose, const Vector3T& gravity) {
+  (void)gravity;
   Vector15T information;
   information << 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f,
                  1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f;
@@ -160,7 +162,7 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
                  const InertialPnPSettings& settings, sba_imu::Pose left, bool have_prior,
                  sba_imu::Pose& result, int64_t time_ns, bool enforce_guard, sba_imu::Pose& guarded_prediction, bool& prediction_valid, bool& conservative_update) {
   conservative_update=false;
-  if (!have_prior) seed_joint_prior(left);
+  if (!have_prior) seed_joint_prior(left, gravity);
   sba_imu::Pose right;
   if (!left.predict_pose(gravity, left.preintegration, right)) return false;
   auto prediction = right;
@@ -366,6 +368,16 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
     }
     TraceMessage("CAM01_QUALITY t=%lld inliers=%d,%d,%d,%d",static_cast<long long>(time_ns),
                  inliers[0],inliers[1],inliers[2],inliers[3]);
+  }
+  if (ok && std::getenv("CUVSLAM_GRAVITY_VZ")) {
+    const float dt = original_left.preintegration.dT_s;
+    if (dt > 1e-6f && gravity.allFinite() && gravity.norm() > 1.f) {
+      const Vector3T up = -gravity.normalized();
+      const Vector3T v_visual = sba_imu::WorldVelocity(original_left.w_from_imu, right.w_from_imu, dt);
+      const float delta = up.dot(v_visual) - up.dot(right.velocity);
+      const float correction = std::clamp(delta, -0.02f, 0.02f);
+      right.velocity += up * correction;
+    }
   }
   if (ok) result = std::move(right);
   return ok;
@@ -577,7 +589,42 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
         TraceMessage("WINDOW_TRACKING_ONLY t=%lld frontend_validated=%d",static_cast<long long>(time_ns),int(guarded));
       }
     }
-    if (has_joint_prior_) return true;
+    if (has_joint_prior_) {
+      const char* gravity_scheme = std::getenv("CUVSLAM_GRAVITY_SCHEME");
+      if (gravity_scheme && std::string_view(gravity_scheme) == "tangent" && maybe_gravity &&
+          last_frame_preint_.dT_s > 1e-4f) {
+        static Vector3T origin = Vector3T::Zero();
+        static bool origin_set = false;
+        const Vector3T& g = *maybe_gravity;
+        if (!origin_set && g.allFinite() && g.norm() > 1.f) {
+          origin = g.normalized() * 9.81f;
+          origin_set = true;
+          std::fprintf(stderr, "GRAVITY_SCHEME tangent on\n");
+        }
+        if (origin_set) {
+          const float dt = last_frame_preint_.dT_s;
+          const Vector3T up = -g.normalized();
+          const Vector3T v_visual =
+              (curr_pose_.w_from_imu.translation() - prev_pose_.w_from_imu.translation()) / dt;
+          Vector3T dg = (v_visual - curr_pose_.velocity) / dt;
+          dg -= up * up.dot(dg);
+          dg *= 0.05f;
+          const float max_step = 9.81f * std::sin(0.02f * 3.14159265f / 180.f);
+          if (dg.norm() > max_step && dg.allFinite()) dg *= max_step / dg.norm();
+          Vector3T updated = g + dg;
+          if (updated.allFinite() && updated.norm() > 1.f) {
+            updated = updated.normalized() * 9.81f;
+            Vector3T delta = updated - origin;
+            const Vector3T axis = origin.normalized();
+            delta -= axis * axis.dot(delta);
+            const float max_dev = 9.81f * std::sin(2.f * 3.14159265f / 180.f);
+            if (delta.norm() > max_dev) updated = (origin + delta * (max_dev / delta.norm())).normalized() * 9.81f;
+            map_.set_gravity(updated);
+          }
+        }
+      }
+      return true;
+    }
     if (window_) { window_->reset(); }
     TraceMessage("JOINT_VISUAL_FALLBACK t=%lld", static_cast<long long>(time_ns));
     return solve_visual(landmarks, observations, depth_infos, planes, depth_points, time_ns);
@@ -809,7 +856,10 @@ bool ImuFusionContext::read_committed_state(int64_t time_ns, Isometry3T& world_f
   prev_pose_.velocity = state.velocity;
   prev_pose_.gyro_bias = state.gyro_bias;
   prev_pose_.acc_bias = state.acc_bias;
-  seed_joint_prior(prev_pose_);
+  {
+    const auto seeded_gravity = map_.get_gravity();
+    seed_joint_prior(prev_pose_, seeded_gravity.value_or(Vector3T(0.f, 9.81f, 0.f)));
+  }
   has_joint_prior_ = false;
   if (last_valid_ts_ns_ == time_ns) last_valid_pose_ = prev_pose_;
   info = prev_pose_.info.topLeftCorner<6, 6>();
@@ -920,7 +970,7 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
     }
     pose.preintegration.SetNewBias(anchor.gyro_bias,anchor.acc_bias);
     pose.preintegration.Reintegrate(calib_);
-    seed_joint_prior(pose);
+    seed_joint_prior(pose, gravity_for_sba);
   };
   synchronize(curr_pose_,prev_pose_ts_ns_);
   synchronize(prev_pose_,prepared_previous_ts_ns_);

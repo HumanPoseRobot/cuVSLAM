@@ -3,6 +3,8 @@
 #include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include "common/log.h"
 #include "gpu_joint_math.h"
@@ -55,7 +57,17 @@ void Pack(const imu::ImuCalibration& cal, const StereoPnPInput& input, const Pos
   d.dt = pi.dT_s;
   Matrix9T info;
   pi.InfoMatrix(info);
-  sqrt_info<9>(d.imu_sqrt, 2. * penalty * info.cast<double>());
+  Eigen::Matrix<double, 9, 9> weighted = 2. * penalty * info.cast<double>();
+  const char* anchor = std::getenv("CUVSLAM_GRAVITY_ANCHOR");
+  if (anchor && std::strcmp(anchor, "1") == 0) {
+    // Position residual is p_j - p_i - v*dt. Scale only that block (x25 on the
+    // existing 0.002, i.e. 0.05) so a visual pose update moves velocity.
+    // Rotation and the velocity residual stay at the caller penalty.
+    Eigen::Matrix<double, 9, 9> S = Eigen::Matrix<double, 9, 9>::Identity();
+    S.block<3, 3>(6, 6) *= 5.;
+    weighted = S * weighted * S;
+  }
+  sqrt_info<9>(d.imu_sqrt, weighted);
   sqrt_info<15>(d.prior_sqrt, l.info.cast<double>());
   for (size_t i = 0; i < input.point_ids.size(); ++i) {
     gpu_vi::Observation o{};

@@ -1,3 +1,4 @@
+#include <cstdlib>
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -135,6 +136,11 @@ bool LocalizerAndMapper::CalcFramePose(FrameId frame_id, Isometry3T& pose) const
     return false;
   }
 
+  if (std::getenv("CUVSLAM_PGO_AUDIT")) {
+    const auto t = keyframe_pose->translation();
+    TraceMessage("PGO_ANCHOR frame=%llu anchor=%llu xyz=%.9g,%.9g,%.9g",
+                 (unsigned long long)frame_id, (unsigned long long)keyframe_id,t.x(),t.y(),t.z());
+  }
   pose = (*keyframe_pose) * from_keyframe_to_frame;
   return true;
 }
@@ -332,6 +338,12 @@ bool LocalizerAndMapper::ApplyLoopClosureResult(const Isometry3T& world_from_lc,
   if (!AddEdgeToPoseGraph(lckf, headkf, lckf_from_correctedheadkf, lc_pose_covariance, edge_stat)) {
     return false;
   }
+  if (std::getenv("CUVSLAM_PGO_AUDIT")) {
+    const auto residual = (world_from_headkf->inverse()*world_from_correctedheadkf);
+    TraceMessage("PGO_EDGE_ADDED from=%llu to=%llu support=%zu innovation_m=%.9g innovation_rad=%.9g",
+                 (unsigned long long)lckf,(unsigned long long)headkf,lc_landmarks.size(),
+                 residual.translation().norm(),Eigen::AngleAxis<Isometry3T::Scalar>(residual.linear()).angle());
+  }
   // Add Landmark Relation to spatial index and pose graph
   for (auto& landmark_in_solver : lc_landmarks) {
     const bool valid = map_.pose_graph_.AddLandmarkRelation(landmark_in_solver.id, headkf);
@@ -364,6 +376,12 @@ bool LocalizerAndMapper::OptimizePoseGraph(bool planar_constraints) {
       const auto* pose_src = map_.pose_graph_hypothesis_.GetKeyframePose(keyframe_id);
       const auto* pose_dst = map_.pose_graph_hypothesis_for_swap_.GetKeyframePose(keyframe_id);
       if (pose_src && pose_dst) {
+        if (std::getenv("CUVSLAM_PGO_AUDIT")) {
+          const auto d = pose_dst->translation()-pose_src->translation();
+          TraceMessage("PGO_NODE id=%llu delta=%.9g,%.9g,%.9g",
+                       (unsigned long long)keyframe_id,d.x(),d.y(),d.z());
+        }
+
         map_.landmarks_spatial_index_->OnUpdateKeyframePose(keyframe_id, (*pose_src) * pose, (*pose_dst) * pose);
       }
     });

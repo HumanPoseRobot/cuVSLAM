@@ -72,7 +72,9 @@ private:
   static Eigen::Matrix<float, 3, 2> TangentBasis(const Vector3T& g);
 
   /// World gravity acceleration (m/s²), OpenCV-style world (+Y down) when aligned with an upright camera rig.
-  const Vector3T default_gravity = {0, GRAVITY_VALUE, 0};
+  // v1.4_gravity: reference axis is estimated from stationary IMU samples.
+  // OpenCV +Y-down remains the fallback until that estimate exists.
+  Vector3T default_gravity = {0, GRAVITY_VALUE, 0};
   Eigen::Matrix<float, 3, 2> JG;
   const Matrix3T acc_prior_info;
 

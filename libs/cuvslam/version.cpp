@@ -37,7 +37,7 @@ std::string_view GetVersion(int32_t* major, int32_t* minor, int32_t* patch) {
   }
   return std::string_view{
       _CRT_STRINGIZE(CUVSLAM_API_VERSION_MAJOR) "." _CRT_STRINGIZE(CUVSLAM_API_VERSION_MINOR) "." _CRT_STRINGIZE(
-          CUVSLAM_API_VERSION_PATCH) "+" CUVSLAM_GIT_HASH_SHORT CUVSLAM_GIT_DIRTY_SUFFIX};
+          CUVSLAM_API_VERSION_PATCH) "+" CUVSLAM_GIT_HASH_SHORT CUVSLAM_GIT_DIRTY_SUFFIX "-v1.4_gravity_vvert"};
 }
 
 }  // namespace cuvslam

@@ -133,7 +133,8 @@ inline Reduced assemble(const Problem& p, const Evaluation& e, bool marginal) {
   std::vector<std::vector<int>> observations(p.points.size());
   for (size_t i = 0; i < p.visuals.size(); ++i) {
     auto& v = p.visuals[i];
-    if (!marginal || touched.count(v.point)) {
+    // Frozen cameras stay as live point factors. They are not folded into the pose prior.
+    if (v.node >= 0 && (!marginal || touched.count(v.point))) {
       observations[v.point].push_back(i);
     }
   }

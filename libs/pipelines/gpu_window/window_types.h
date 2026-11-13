@@ -2,7 +2,7 @@
 #include <array>
 #include "gpu_joint_types.h"
 namespace gpu_window {
-constexpr int Slots = 6, Dim = Slots * 15;  // five retained keyframes plus current image
+constexpr int Slots = 8, Dim = Slots * 15;  // seven retained keyframes plus current image
 struct State {
   double R[9]{1, 0, 0, 0, 1, 0, 0, 0, 1}, p[3]{}, v[3]{}, bg[3]{}, ba[3]{};
 };
@@ -13,6 +13,8 @@ struct Edge {
 };
 struct Visual {
   int node = 0, point = 0;
+  // node < 0: pose is frozen in fixed and the residual constrains only the point.
+  State fixed{};
   gpu_vi::Observation obs{};
 };
 struct Problem {

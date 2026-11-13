@@ -1,3 +1,6 @@
+#include <cstdlib>
+#include <fstream>
+#include <cstdio>
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -120,9 +123,57 @@ bool PoseGraph::OptimizeSubgraph(const std::vector<KeyFrameId>& keyframes_to_opt
 
   try {
     TRACE_EVENT te_opt = profiler_domain_.trace_event("optimizer.optimize()", profiler_color_);
+    const bool audit = std::getenv("CUVSLAM_PGO_FROZEN") != nullptr;
+    const auto frozen = audit ? decltype(inputs_)(inputs_) : decltype(inputs_)();
     if (!pgo.run(inputs_, 10)) {
       TraceError("PoseGraph optimization failed.");
       return false;
+    }
+    if (audit) {
+      auto repeat = frozen;
+      const bool ok = pgo.run(repeat, 10);
+      double max_delta = 0.;
+      if (ok) {
+        for (size_t i=0; i<inputs_.poses.size(); ++i) {
+          max_delta = std::max(max_delta, double((inputs_.poses[i].matrix()-repeat.poses[i].matrix()).norm()));
+        }
+      }
+      TraceMessage("PGO_FROZEN nodes=%zu edges=%zu ok=%d max_matrix_delta=%.9g",
+                   frozen.poses.size(),frozen.deltas.size(),int(ok),max_delta);
+    }
+    if (const char* spec = std::getenv("CUVSLAM_PGO_ABLATE")) {
+      unsigned long long from, to;
+      if (std::sscanf(spec, "%llu,%llu", &from, &to) == 2 &&
+          kf_to_pose.count(from) && kf_to_pose.count(to)) {
+        auto reduced = frozen;
+        const auto a = kf_to_pose.at(from), b = kf_to_pose.at(to);
+        const auto before = reduced.deltas.size();
+        reduced.deltas.erase(std::remove_if(reduced.deltas.begin(), reduced.deltas.end(),
+          [&](const auto& e) {return (e.pose1_id==a && e.pose2_id==b)||(e.pose1_id==b && e.pose2_id==a);}),
+          reduced.deltas.end());
+        if (before != reduced.deltas.size()) {
+          const bool ok = pgo.run(reduced,10);
+          TraceMessage("PGO_ABLATE from=%llu to=%llu removed=%zu ok=%d",from,to,before-reduced.deltas.size(),int(ok));
+          if (ok) {
+            for(size_t i=0;i<inputs_.poses.size();++i) {
+              const auto delta=reduced.poses[i].translation()-inputs_.poses[i].translation();
+              TraceMessage("PGO_ABLATE_NODE id=%llu delta=%.9g,%.9g,%.9g",
+                (unsigned long long)pose_to_kf.at(i),delta.x(),delta.y(),delta.z());
+            }
+          }
+          if (const char* file=std::getenv("CUVSLAM_PGO_GRAPH")) {
+            std::ofstream out(file,std::ios::app);
+            out.precision(17);
+            out<<"graph "<<frozen.poses.size()<<" "<<frozen.deltas.size()<<" "<<frozen.robustifier<<" "<<frozen.use_planar_constraint<<" "<<frozen.planar_weight<<" "<<frozen.plane_normal.transpose()<<'\n';
+            for(size_t i=0;i<frozen.poses.size();++i)
+              out<<"node "<<i<<" "<<pose_to_kf.at(i)<<" "<<frozen.constrained_pose_ids.count(i)<<" "<<Eigen::Map<const Eigen::Matrix<float,16,1>>(frozen.poses[i].matrix().data()).transpose()<<'\n';
+            for(const auto& e:frozen.deltas)
+              out<<"edge "<<e.pose1_id<<" "<<e.pose2_id<<" "<<Eigen::Map<const Eigen::Matrix<float,16,1>>(e.pose1_from_pose2.matrix().data()).transpose()<<" "<<Eigen::Map<const Eigen::Matrix<float,36,1>>(e.info.data()).transpose()<<'\n';
+            for(size_t i=0;i<inputs_.poses.size();++i)
+              out<<"result "<<i<<" "<<Eigen::Map<const Eigen::Matrix<float,16,1>>(inputs_.poses[i].matrix().data()).transpose()<<'\n';
+          }
+        }
+      }
     }
     te_opt.Pop();
   } catch (const std::exception& e) {
