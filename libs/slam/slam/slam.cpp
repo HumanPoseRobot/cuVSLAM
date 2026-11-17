@@ -1,3 +1,5 @@
+#include <limits>
+#include "math/twist.h"
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -119,14 +121,14 @@ bool LocalizerAndMapper::SelectHeadKeyframe(KeyFrameId const_slam_keyframe_id, i
   return map_.pose_graph_.SelectHeadKeyframe(const_slam_keyframe_id, timestamp_ns);
 }
 
-bool LocalizerAndMapper::CalcFramePose(FrameId frame_id, Isometry3T& pose) const {
+bool LocalizerAndMapper::CalcFramePose(FrameId frame_id, Isometry3T& pose, KeyFrameId* source_keyframe) const {
   if (!keep_track_poses_) {
     return false;
   }
 
   KeyFrameId keyframe_id = InvalidKeyFrameId;
   Isometry3T from_keyframe_to_frame = Isometry3T::Identity();
-  FindKeyframeByFrame(frame_id, keyframe_id, from_keyframe_to_frame);
+  FindKeyframeByFrame(frame_id, keyframe_id, from_keyframe_to_frame, source_keyframe);
 
   const Isometry3T* keyframe_pose = map_.pose_graph_hypothesis_.GetKeyframePose(keyframe_id);
 
@@ -140,9 +142,9 @@ bool LocalizerAndMapper::CalcFramePose(FrameId frame_id, Isometry3T& pose) const
 }
 
 bool LocalizerAndMapper::FindKeyframeByFrame(FrameId frame_id, KeyFrameId& keyframe_id,
-                                             Isometry3T& from_keyframe_to_frame) const {
+                                             Isometry3T& from_keyframe_to_frame, KeyFrameId* source_keyframe) const {
   keyframe_id = InvalidKeyFrameId;
-  int diff = INT32_MAX;
+  FrameId diff = std::numeric_limits<FrameId>::max();
 
   // sourced keyframes
   for (auto it : keyframe_sources_) {
@@ -152,7 +154,7 @@ bool LocalizerAndMapper::FindKeyframeByFrame(FrameId frame_id, KeyFrameId& keyfr
       continue;
     }
 
-    if (diff < static_cast<int>(frame_id) - static_cast<int>(td)) {
+    if (diff < frame_id - td) {
       continue;
     }
 
@@ -164,6 +166,9 @@ bool LocalizerAndMapper::FindKeyframeByFrame(FrameId frame_id, KeyFrameId& keyfr
     }
   }
 
+  // Preserve the source ID: different source frames can resolve to the same
+  // surviving node while retaining different source-to-node transforms.
+  if (source_keyframe) *source_keyframe = keyframe_id;
   // removed keyframes
   from_keyframe_to_frame = Isometry3T::Identity();
   for (;;) {
@@ -329,7 +334,13 @@ bool LocalizerAndMapper::ApplyLoopClosureResult(const Isometry3T& world_from_lc,
   const Isometry3T lckf_from_world = world_from_lckf->inverse();
   const Isometry3T lckf_from_correctedheadkf = lckf_from_world * world_from_correctedheadkf;
 
-  if (!AddEdgeToPoseGraph(lckf, headkf, lckf_from_correctedheadkf, lc_pose_covariance, edge_stat)) {
+  const auto J = math::adjoint(estimate_from_head.inverse() * world_from_lc.inverse()).cast<double>().eval();
+  const Eigen::Matrix<double, 6, 6> covariance = J * lc_pose_covariance.cast<double>() * J.transpose();
+  const Matrix6T edge_covariance = (0.5 * (covariance + covariance.transpose())).cast<float>();
+  if (!edge_covariance.allFinite() || Eigen::LLT<Matrix6T>(edge_covariance).info() != Eigen::Success) {
+    return false;
+  }
+  if (!AddEdgeToPoseGraph(lckf, headkf, lckf_from_correctedheadkf, edge_covariance, edge_stat)) {
     return false;
   }
   // Add Landmark Relation to spatial index and pose graph

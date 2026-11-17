@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <string_view>
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -197,7 +199,9 @@ void AsyncSlam::TrackResult(FrameId frameId, int64_t timestamp_ns, const odom::I
     VO_ResetFrameData(frameId, timestamp_ns, track_data_);
   }
   if (options_.pose_for_frame_required) {
-    trajectory_[frameId] = track_data_;
+    std::lock_guard slam_guard(slam_mutex_);
+    history_odometry_pose_ = history_odometry_pose_ * delta;
+    trajectory_[frameId] = {track_data_, history_odometry_pose_};
   }
 
 #ifdef USE_RERUN
@@ -244,16 +248,16 @@ bool AsyncSlam::GetPoseForFrame(FrameId frameId, Isometry3T& pose) const {
     return false;
   }
 
+  std::lock_guard slam_guard(slam_mutex_);
   auto it = trajectory_.find(frameId);
   if (it == trajectory_.end()) {
     SlamStderr("Pose not found for frame %zd.\n", static_cast<uint64_t>(frameId));
     return false;
   }
-  auto& track_data = it->second;
+  const auto& track_data = it->second.track;
   assert(track_data.from_keyframe.matrix().allFinite());
 
   Isometry3T m;
-  std::lock_guard slam_guard(slam_mutex_);
   if (slam_->CalcFramePose(track_data.end_frame_id, m)) {
     m = m * track_data.from_keyframe;
     pose = m;
@@ -269,18 +273,58 @@ bool AsyncSlam::GetPosesForAllFrames(std::map<uint64_t, storage::Isometry3<float
   }
 
   std::lock_guard slam_guard(slam_mutex_);
-  for (auto it : trajectory_) {
-    auto& track_data = it.second;
-    uint64_t timestamp_ns = it.second.timestamp_ns;
-    assert(track_data.from_keyframe.matrix().allFinite());
-
-    Isometry3T m;
-    if (slam_->CalcFramePose(track_data.end_frame_id, m)) {
-      m = m * track_data.from_keyframe;
-      Isometry3T pose = m;
-      frames[timestamp_ns] = pose;
+  struct Sample {
+    uint64_t time;
+    FrameId frame;
+    FrameId anchor;
+    Isometry3T odometry;
+    Isometry3T correction;
+  };
+  std::vector<Sample> segment;
+  const char* setting = std::getenv("CUVSLAM_CONTINUOUS_SLAM_HISTORY");
+  const bool continuous = !setting || std::string_view(setting) != "0";
+  auto flush = [&]() {
+    if (segment.empty()) return;
+    std::vector<size_t> knots{0};
+    for (size_t i = 1; i < segment.size(); ++i) {
+      if (segment[i-1].anchor != segment[i].anchor) knots.push_back(i);
     }
+    if (knots.back() != segment.size() - 1) knots.push_back(segment.size() - 1);
+    size_t interval = 0;
+    for (size_t i = 0; i < segment.size(); ++i) {
+      while (interval + 1 < knots.size() && i > knots[interval + 1]) ++interval;
+      const auto& left = segment[knots[interval]];
+      const auto& right = segment[knots[std::min(interval + 1, knots.size() - 1)]];
+      const auto& cur = segment[i];
+      const float alpha = left.time == right.time ? 0.f : float(double(cur.time - left.time) / double(right.time - left.time));
+      Isometry3T correction = Isometry3T::Identity();
+      correction.linear() = Eigen::Quaternionf(left.correction.linear()).normalized()
+          .slerp(alpha, Eigen::Quaternionf(right.correction.linear()).normalized()).toRotationMatrix();
+      correction.translation() = (1.f-alpha)*left.correction.translation() + alpha*right.correction.translation();
+      const Isometry3T corrected = correction * cur.odometry;
+      frames[cur.time] = corrected;
+    }
+    segment.clear();
+  };
+  for (const auto& [id, entry] : trajectory_) {
+    const auto& track = entry.track;
+    Isometry3T anchor;
+    KeyFrameId source_anchor = InvalidKeyFrameId;
+    if (!slam_->CalcFramePose(track.end_frame_id, anchor, &source_anchor)) {
+      flush();
+      continue;
+    }
+    const Isometry3T pose = anchor * track.from_keyframe;
+    if (!continuous) {
+      frames[track.timestamp_ns] = pose;
+      continue;
+    }
+    if (!segment.empty() &&
+        (id != segment.back().frame + 1 || track.timestamp_ns <= segment.back().time)) flush();
+    segment.push_back({track.timestamp_ns, id, source_anchor, entry.odometry_pose,
+                       pose * entry.odometry_pose.inverse()});
   }
+  flush();
   return true;
 }
 

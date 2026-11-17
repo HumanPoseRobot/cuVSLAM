@@ -119,7 +119,12 @@ private:
   std::unique_ptr<LocalizerAndMapper> slam_;                 // should be protected by slam_mutex_
   Tail tail_;                                                // thread-safe
   std::unique_ptr<ILoopClosureSolver> loop_closure_solver_;  // should be accessed from slam thread only
-  std::map<FrameId, VOTrackData> trajectory_;
+  struct HistoryEntry {
+    VOTrackData track;
+    Isometry3T odometry_pose;
+  };
+  Isometry3T history_odometry_pose_ = Isometry3T::Identity();
+  std::map<FrameId, HistoryEntry> trajectory_;
 
   std::thread thread_;
 

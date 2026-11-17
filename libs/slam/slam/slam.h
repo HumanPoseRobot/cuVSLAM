@@ -279,9 +279,9 @@ public:
 
   // ----- Only if keep_track_poses true -----
   // calc the pose for the past frame
-  bool CalcFramePose(FrameId frame_id, Isometry3T& pose) const;
+  bool CalcFramePose(FrameId frame_id, Isometry3T& pose, KeyFrameId* source_keyframe = nullptr) const;
   // Find Keyframe and transform By FrameId
-  bool FindKeyframeByFrame(FrameId frame_id, KeyFrameId& keyframe_id, Isometry3T& from_keyframe_to_frame) const;
+  bool FindKeyframeByFrame(FrameId frame_id, KeyFrameId& keyframe_id, Isometry3T& from_keyframe_to_frame, KeyFrameId* source_keyframe = nullptr) const;
 
   [[nodiscard]] bool SelectHeadKeyframe(KeyFrameId const_slam_keyframe_id, int64_t timestamp_ns);
 
