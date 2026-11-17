@@ -15,6 +15,7 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -227,6 +228,49 @@ TEST(PGO, DISABLED_PGOTestPlanar) {
       ASSERT_TRUE(std::abs(e) < thresh);
     }
   }
+}
+
+TEST(PGO, RejectsInvalidCostWithoutChangingPoses) {
+  for (bool planar : {false, true}) {
+    PGOInput input;
+    input.use_planar_constraint = planar;
+    input.poses.assign(2, Isometry3T::Identity());
+    input.poses[1].translation().x() = 1.f;
+    input.constrained_pose_ids.insert(0);
+    Matrix6T info = Matrix6T::Identity();
+    info(3, 3) = std::numeric_limits<float>::quiet_NaN();
+    input.deltas.push_back({0, 1, Isometry3T::Identity(), info});
+    EXPECT_FALSE(PGO().run(input, 1));
+    EXPECT_FLOAT_EQ(input.poses[1].translation().x(), 1.f);
+  }
+}
+
+TEST(PGO, ZeroCostAndZeroIterationBudget) {
+  PGOInput input;
+  input.poses.assign(2, Isometry3T::Identity());
+  input.constrained_pose_ids.insert(0);
+  input.deltas.push_back({0, 1, Isometry3T::Identity(), Matrix6T::Identity()});
+  PGO solver;
+  EXPECT_TRUE(solver.run(input, 1));
+  input.poses[1].translation().x() = 1.f;
+  EXPECT_FALSE(solver.run(input, 0));
+  EXPECT_FLOAT_EQ(input.poses[1].translation().x(), 1.f);
+  EXPECT_TRUE(solver.run(input, 10));
+  EXPECT_NEAR(input.poses[1].translation().x(), 0.f, 1e-4f);
+}
+
+TEST(PGO, ClearResetsPlanarSettings) {
+  PGOInput input;
+  input.use_planar_constraint = true;
+  input.plane_normal.setOnes();
+  input.planar_weight = 9.f;
+  input.robustifier = 4.f;
+  input.clear();
+  const PGOInput defaults;
+  EXPECT_FALSE(input.use_planar_constraint);
+  EXPECT_TRUE(input.plane_normal.isApprox(defaults.plane_normal));
+  EXPECT_FLOAT_EQ(input.planar_weight, defaults.planar_weight);
+  EXPECT_FLOAT_EQ(input.robustifier, defaults.robustifier);
 }
 
 }  // namespace test::math

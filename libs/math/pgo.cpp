@@ -17,6 +17,8 @@
 
 #include "math/pgo.h"
 
+#include <cmath>
+
 #include "Eigen/Sparse"
 
 #include "common/types.h"
@@ -405,6 +407,10 @@ void PGOInput::clear() {
   deltas.clear();
   poses.clear();
   constrained_pose_ids.clear();
+  use_planar_constraint = false;
+  plane_normal << 1.f, 0.f, 0.f, 0.f;
+  planar_weight = 1.f;
+  robustifier = 0.1f;
 }
 
 // Precondition: inputs.poses.size() > inputs.constrained_pose_ids.size())
@@ -459,7 +465,10 @@ bool PGO::pgo_planar(PGOInput& inputs, int max_iterations) const {
   assert(inputs.poses.size() > inputs.constrained_pose_ids.size());
   auto initial_cost = evaluate_cost_planar(inputs, index, variables, step_, constrained_steps);
   // std::cout << "initial_cost = " << initial_cost << std::endl;
+  if (!std::isfinite(initial_cost) || initial_cost < 0.f) return false;
+  if (initial_cost == 0.f || max_iterations <= 0) return initial_cost == 0.f;
   auto current_cost = initial_cost;
+  bool converged = false;
 
   assert(inputs.poses.size() > inputs.constrained_pose_ids.size());
   build_hessian_planar(inputs, index, variables, H_, rhs_, systems);
@@ -481,9 +490,14 @@ bool PGO::pgo_planar(PGOInput& inputs, int max_iterations) const {
     HS_.diagonal() += lambda * HS_.diagonal();
 
     solver.compute(HS_);
+    if (solver.info() != Eigen::Success) return false;
     step_ = solver.solve(rhs_);
+    if (solver.info() != Eigen::Success || !step_.allFinite()) return false;
 
     constraint_solve(lambda, systems, constrained_steps);
+    for (const auto& step : constrained_steps) {
+      if (!step.allFinite()) return false;
+    }
 
     assert(inputs.poses.size() > inputs.constrained_pose_ids.size());
     auto cost = evaluate_cost_planar(inputs, index, variables, step_, constrained_steps);
@@ -501,12 +515,17 @@ bool PGO::pgo_planar(PGOInput& inputs, int max_iterations) const {
 
     auto predicted_relative_reduction = prr1 / current_cost + 2.f * lambda * prr2 / current_cost;
 
-    if ((predicted_relative_reduction < 1e-6) && (step_.norm() < 1e-6)) {
-      current_cost = cost;
+    if (std::isfinite(predicted_relative_reduction) && predicted_relative_reduction >= 0.f &&
+        predicted_relative_reduction < 1e-6f && prr2 < 1e-12f) {
+      converged = std::isfinite(cost) && cost >= 0.f &&
+                  std::abs(cost - current_cost) <= 1e-4f * current_cost;
       break;
     }
 
-    auto rho = (1.f - cost / current_cost) / predicted_relative_reduction;
+    const float rho = std::isfinite(cost) && cost >= 0.f && cost < current_cost &&
+                              std::isfinite(predicted_relative_reduction) && predicted_relative_reduction > 0.f
+                          ? (1.f - cost / current_cost) / predicted_relative_reduction
+                          : 0.f;
 
     // we have achieved sufficient decrease
     if (rho > 0.25f) {
@@ -531,6 +550,7 @@ bool PGO::pgo_planar(PGOInput& inputs, int max_iterations) const {
       }
 
       current_cost = cost;
+      if (current_cost == 0.f) break;
       assert(inputs.poses.size() > inputs.constrained_pose_ids.size());
       build_hessian_planar(inputs, index, variables, H_, rhs_, systems);
     } else {
@@ -539,7 +559,7 @@ bool PGO::pgo_planar(PGOInput& inputs, int max_iterations) const {
   } while (num_iterations < max_iterations);
   // std::cout << "curr = " << current_cost << ", init = " << initial_cost << std::endl;
 
-  bool status = current_cost < initial_cost || num_iterations == max_iterations;
+  const bool status = std::isfinite(current_cost) && (converged || current_cost < initial_cost);
 
   if (status) {
     for (size_t i = 0; i < variables.size(); i++) {
@@ -582,7 +602,10 @@ bool PGO::pgo_regular(PGOInput& inputs, int max_iterations) const {
 
   auto initial_cost = evaluate_cost(inputs, index, variables, step_);
   // std::cout << "initial_cost = " << initial_cost << std::endl;
+  if (!std::isfinite(initial_cost) || initial_cost < 0.f) return false;
+  if (initial_cost == 0.f || max_iterations <= 0) return initial_cost == 0.f;
   auto current_cost = initial_cost;
+  bool converged = false;
 
   build_hessian(inputs, index, variables, H_, rhs_);
 
@@ -600,19 +623,26 @@ bool PGO::pgo_regular(PGOInput& inputs, int max_iterations) const {
     HS_.diagonal() += lambda * HS_.diagonal();
 
     solver.compute(HS_);
+    if (solver.info() != Eigen::Success) return false;
     step_ = solver.solve(rhs_);
+    if (solver.info() != Eigen::Success || !step_.allFinite()) return false;
 
     auto cost = evaluate_cost(inputs, index, variables, step_);
 
     auto predicted_relative_reduction = step_.dot(H_ * step_) / current_cost +
                                         2.f * lambda * step_.dot(H_.diagonal().asDiagonal() * step_) / current_cost;
 
-    if ((predicted_relative_reduction < 1e-4) && (step_.norm() < 1e-4)) {
-      current_cost = cost;
+    if (std::isfinite(predicted_relative_reduction) && predicted_relative_reduction >= 0.f &&
+        predicted_relative_reduction < 1e-4f && step_.norm() < 1e-4f) {
+      converged = std::isfinite(cost) && cost >= 0.f &&
+                  std::abs(cost - current_cost) <= 1e-4f * current_cost;
       break;
     }
 
-    auto rho = (1.f - cost / current_cost) / predicted_relative_reduction;
+    const float rho = std::isfinite(cost) && cost >= 0.f && cost < current_cost &&
+                              std::isfinite(predicted_relative_reduction) && predicted_relative_reduction > 0.f
+                          ? (1.f - cost / current_cost) / predicted_relative_reduction
+                          : 0.f;
 
     // std::cout << "curr = " << current_cost << ", cost = " << cost << " rho = " << rho << std::endl;
     // we have achieved sufficient decrease
@@ -632,6 +662,7 @@ bool PGO::pgo_regular(PGOInput& inputs, int max_iterations) const {
       }
 
       current_cost = cost;
+      if (current_cost == 0.f) break;
       build_hessian(inputs, index, variables, H_, rhs_);
     } else {
       lambda *= 2.f;
@@ -639,7 +670,7 @@ bool PGO::pgo_regular(PGOInput& inputs, int max_iterations) const {
   } while (num_iterations < max_iterations);
   // std::cout << "curr = " << current_cost << ", init = " << initial_cost << std::endl;
 
-  bool status = current_cost < initial_cost || num_iterations == max_iterations;
+  const bool status = std::isfinite(current_cost) && (converged || current_cost < initial_cost);
 
   if (status) {
     for (size_t i = 0; i < variables.size(); i++) {
