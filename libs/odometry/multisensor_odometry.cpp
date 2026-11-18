@@ -170,10 +170,14 @@ bool MultisensorOdometry::track(const Sources& curr_sources, const DepthSources&
   }
 
   if (!have_pose) {
-    reset();
+    if (!solver_.can_reacquire_after_loss()) {
+      reset();
+      TraceError("Failed to track on the PnP stage");
+    } else {
+      TraceMessage("VIO_RETAIN_MAP t=%lld publish=0", static_cast<long long>(timestamp));
+    }
     delta = Isometry3T::Identity();
     static_info_exp.setZero();
-    TraceError("Failed to track on the PnP stage");
     return false;
   }
 

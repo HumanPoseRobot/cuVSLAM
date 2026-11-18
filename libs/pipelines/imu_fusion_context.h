@@ -124,6 +124,29 @@ public:
 
   bool has_imu_state() const { return !is_first_run_; }
   bool allow_map_update() const { return !guard_prediction_only_ && !guard_exhausted_; }
+  // Publishing is suspended after the short prediction budget. A healthy
+  // propagated state can still re-acquire the old map until the IMU state
+  // machine reaches its existing integration timeout.
+  bool can_reacquire_after_loss() const {
+    return guard_exhausted_ && can_seed_recovery();
+  }
+  struct RecoveryAnchor {
+    int64_t time_ns;
+    sba_imu::Pose pose;
+    sba_imu::IMUPreintegration previous_keyframe_preint;
+    std::vector<Landmark> landmarks;
+    std::vector<camera::Observation> observations;
+  };
+  std::optional<RecoveryAnchor> recovery_anchor;
+  bool can_seed_recovery() const {
+    return guard_internal_prediction_ && sm_.state() == StateMachine::State::Ok;
+  }
+  const sba_imu::Pose& propagated_pose() const { return prev_pose_; }
+  void commit_recovery_anchor(int64_t current_time_ns);
+  Isometry3T recovery_rig_pose() const { return prev_pose_.w_from_imu * calib_.rig_from_imu().inverse(); }
+  bool validate_recovery_seed(const map::Map<TrackId, Vector3T>& points,
+                              const std::vector<camera::Observation>& observations,
+                              int required, int64_t time_ns) const;
   Vector3T velocity() const { return prev_pose_.velocity; }
   Vector3T gyro_bias() const { return prev_pose_.gyro_bias; }
   Vector3T acc_bias() const { return prev_pose_.acc_bias; }
@@ -161,6 +184,10 @@ private:
   int64_t prev_pose_ts_ns_ = -1;
   int64_t prepared_previous_ts_ns_ = -1;
   int64_t last_kf_ts_ns_ = -1;
+  // The anchor is propagated with IMU and its new landmark geometry has only
+  // just been verified. It must not be the sole historical node of a window
+  // that can revise the next normally published frame.
+  int64_t last_recovery_anchor_ts_ns_ = -1;
   int64_t last_valid_ts_ns_ = -1;
 
   sba_imu::Pose prev_pose_;        // last accepted rig pose, used as the IMU integration anchor

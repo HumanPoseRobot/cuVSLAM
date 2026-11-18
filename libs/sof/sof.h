@@ -110,12 +110,10 @@ public:
       }
 
       Vector2T xy;
-      if (!intrinsics.normalizePoint(t.position(), xy)) {
-        continue;
+      Matrix2T info_xy;
+      if (camera::TryObservationInfoUVToXY(intrinsics, t.position(), t.info(), xy, info_xy)) {
+        frameTracks.emplace_back(t.cam_id(), t.id(), xy, info_xy);
       }
-
-      frameTracks.push_back(
-          {t.cam_id(), t.id(), xy, camera::ObservationInfoUVToXY(intrinsics, t.position(), xy, t.info())});
     }
   }
 

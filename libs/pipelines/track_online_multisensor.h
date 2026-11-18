@@ -85,6 +85,7 @@ public:
   std::optional<ImuState> GetImuState() const;
 
   bool has_imu() const { return with_imu_; }
+  bool can_reacquire_after_loss() const { return imu_ && imu_->can_reacquire_after_loss(); }
 
 private:
   bool solveNextFrameVisualOnly(int64_t time_ns, const sof::FrameState& frameState,

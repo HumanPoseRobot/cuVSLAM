@@ -115,7 +115,7 @@ bool MultiSOFBase::trackNextFrame(const Sources& curr_sources, Images& curr_imag
           continue;
         }
         LaunchTrackingPrimaryToSecondary(primary_cam_id, secondary_cam_id, curr_sources, curr_images,
-                                         observations[primary_cam_id], &observations[secondary_cam_id]);
+                                         masks_sources, observations[primary_cam_id], &observations[secondary_cam_id]);
       }
     }
     // if (num_prim_to_sec_tracks == 0) {
@@ -124,7 +124,7 @@ bool MultiSOFBase::trackNextFrame(const Sources& curr_sources, Images& curr_imag
     //     reset_keyframe_selector();
     //     return true;
     // }
-    GetTrackingResults(observations);
+    GetTrackingResults(observations, masks_sources, curr_images);
     state = FrameState::Key;
   }
   return true;

@@ -441,6 +441,8 @@ void ImuFusionContext::register_gravity_callback() {
 void ImuFusionContext::reset() {
   if (window_) { window_->reset(); }
   imu_storage_.clear();
+  recovery_anchor.reset();
+  last_recovery_anchor_ts_ns_ = -1;
   sm_.reset();
   joint_active_ = has_joint_prior_ = false;
   guard_prediction_only_ = guard_exhausted_ = guard_internal_prediction_ = false; guard_rejected_s_ = 0;
@@ -559,7 +561,16 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
       return false; // FrameFailed: never promote prediction to a valid visual anchor
     }
     if (has_joint_prior_) guard_rejected_s_ = 0;
-    if (window_ && is_keyframe && has_joint_prior_) {
+    const bool needs_independent_anchor =
+        last_recovery_anchor_ts_ns_ >= 0 && last_kf_ts_ns_ == last_recovery_anchor_ts_ns_;
+    if (window_ && is_keyframe && has_joint_prior_ && needs_independent_anchor) {
+      // Preserve the accepted adjacent-frame VI result and let its ordinary
+      // keyframe become the next window seed. No candidate is published and
+      // no tentative window/map transaction is committed at this keyframe.
+      window_->discard_pending();
+      TraceMessage("WINDOW_RECOVERY_DEFER t=%lld anchor=%lld",
+                   static_cast<long long>(time_ns), static_cast<long long>(last_recovery_anchor_ts_ns_));
+    } else if (window_ && is_keyframe && has_joint_prior_) {
       const auto tracked = curr_pose_;
       auto candidate = tracked;
       auto validator = [&](const sba_imu::Pose& value,const std::map<TrackId,Vector3T>& points) {
@@ -771,6 +782,34 @@ bool ImuFusionContext::on_keyframe_committed(bool lost) {
   const sba_imu::Pose& pose = lost ? last_valid_pose_ : prev_pose_;
   last_kf_preint_ = sba_imu::IMUPreintegration(pose.gyro_bias, pose.acc_bias);
   return true;
+}
+
+bool ImuFusionContext::validate_recovery_seed(const map::Map<TrackId, Vector3T>& points,
+                                               const std::vector<camera::Observation>& observations,
+                                               int required, int64_t time_ns) const {
+  return frontend_guard::validate(calib_, rig_, points, observations, prev_pose_, prev_pose_,
+                                   required, 1./30., time_ns, "stereo_seed", false, true);
+}
+
+void ImuFusionContext::commit_recovery_anchor(int64_t current_time_ns) {
+  const auto& anchor = *recovery_anchor;
+  const auto world_from_rig = anchor.pose.w_from_imu * calib_.rig_from_imu().inverse();
+  const map::State state{world_from_rig.inverse(), anchor.pose.velocity,
+                         anchor.pose.acc_bias, anchor.pose.gyro_bias};
+  map_.add_keyframe(anchor.time_ns, state, anchor.previous_keyframe_preint,
+                    anchor.observations, anchor.landmarks);
+  last_kf_ts_ns_ = anchor.time_ns;
+  last_recovery_anchor_ts_ns_ = anchor.time_ns;
+  integ_kf_ = anchor.pose;
+  last_kf_preint_ = sba_imu::IMUPreintegration(calib_, imu_storage_, anchor.pose.gyro_bias,
+                                              anchor.pose.acc_bias, anchor.time_ns, current_time_ns);
+  if (window_) {
+    window_->reset();
+  }
+  TraceMessage("VIO_STEREO_RECOVERED t=%lld anchor=%lld landmarks=%zu",
+               static_cast<long long>(current_time_ns), static_cast<long long>(anchor.time_ns),
+               anchor.landmarks.size());
+  recovery_anchor.reset();
 }
 
 std::optional<Matrix3T> ImuFusionContext::joint_position_covariance() const {

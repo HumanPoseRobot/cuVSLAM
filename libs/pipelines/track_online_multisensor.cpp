@@ -227,12 +227,20 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   TraceMessage("VIO_FUSION_STATE t=%lld ready=%d gravity=%d healthy=%d", static_cast<long long>(time_ns), static_cast<int>(prep.imu_state == StateMachine::State::Ok), static_cast<int>(map_.get_gravity().has_value()), static_cast<int>(prep.no_drops));
 
   bool pnp_result = false;
+  auto& recovery = imu_->recovery_anchor;
+  const bool trying_recovery = recovery && prep.no_drops && prep.imu_state == StateMachine::State::Ok;
   if (!map_.empty()) {
     map_.get_recent_landmarks(recent_landmarks_);
 
     if (prep.imu_state == StateMachine::State::Ok) {
+      if (trying_recovery) {
+        for (const auto& landmark : recovery->landmarks) {
+          recent_landmarks_.try_emplace(landmark.id, landmark.point_w);
+        }
+      }
       pnp_result = imu_->solve_inertial(recent_landmarks_, obs_vector_, depth_infos, depth_maps_.planes(),
-                                        depth_maps_.depth_points(), time_ns, solver_settings.imu_pnp, prep.no_drops, frameState == sof::FrameState::Key);
+                                        depth_maps_.depth_points(), time_ns, solver_settings.imu_pnp, prep.no_drops,
+                                        frameState == sof::FrameState::Key && !trying_recovery);
     } else {
       pnp_result = imu_->solve_visual(recent_landmarks_, obs_vector_, depth_infos, depth_maps_.planes(),
                                       depth_maps_.depth_points(), time_ns);
@@ -246,6 +254,39 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   world_from_rig = frame.world_from_rig;
   static_info_exp = frame.static_info_exp;
   prev_rig_from_world_ = world_from_rig.inverse();
+
+  if (trying_recovery && pnp_result && frame.valid_pose) {
+    imu_->commit_recovery_anchor(time_ns);
+  }
+  if (!pnp_result && prep.no_drops && imu_->can_seed_recovery() && !solver_settings.sba.async &&
+      frameState == sof::FrameState::Key) {
+    const auto& predicted_pose = imu_->propagated_pose();
+    // Triangulate in the propagated rig pose, not in the last published pose.
+    // The hypothesis stays private until later images validate its reprojection.
+    const Isometry3T seed_world_from_rig = imu_->recovery_rig_pose();
+    MulticamTriangulator triangulator(rig_);
+    auto candidates = triangulator.triangulate(seed_world_from_rig, obs_vector_);
+    std::vector<Landmark> points;
+    map::Map<TrackId, Vector3T> point_lookup;
+    for (const auto& point : candidates) {
+      if (point.point_w.allFinite() && recent_landmarks_.count(point.id) == 0) {
+        points.push_back(point);
+        point_lookup.emplace(point.id, point.point_w);
+      }
+    }
+    if (imu_->validate_recovery_seed(point_lookup, obs_vector_, solver_settings.imu_pnp.min_observations, time_ns)) {
+      std::vector<camera::Observation> supporting;
+      for (const auto& observation : obs_vector_) {
+        if (point_lookup.count(observation.id) != 0) {
+          supporting.push_back(observation);
+        }
+      }
+      recovery = ImuFusionContext::RecoveryAnchor{time_ns, predicted_pose, imu_->last_kf_preint(),
+                                                  std::move(points), std::move(supporting)};
+      TraceMessage("VIO_STEREO_SEED t=%lld landmarks=%zu", static_cast<long long>(time_ns),
+                   recovery->landmarks.size());
+    }
+  }
 
   RERUN(logTrajectory, prev_rig_from_world_, "world/trajectories/vo_trajectory", Color(0, 255, 0), TrajectoryType::VO);
 
@@ -264,7 +305,10 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
                      prep.imu_state == StateMachine::State::Ok &&
                      std::none_of(depth_infos.begin(),depth_infos.end(),[](auto p){ return p != nullptr; });
   const bool online_temporal = std::getenv("CUVSLAM_ONLINE_TEMPORAL") != nullptr;
-  if ((!online_temporal && (!ready || !temporal_ready_)) || frame.lost) temporal_.clear();
+  const bool recoverable_loss = frame.lost && imu_->can_reacquire_after_loss();
+  if ((!online_temporal && (!ready || !temporal_ready_)) || (frame.lost && !recoverable_loss)) {
+    temporal_.clear();
+  }
   temporal_ready_ = ready;
   if (frame.lost) {
     return false;

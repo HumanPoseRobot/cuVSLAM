@@ -66,9 +66,9 @@ private:
   Settings sof_settings_;
 
   void LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId secondary_id, const Sources& curr_sources,
-                                        Images& curr_images, const std::vector<camera::Observation>& primary_obs,
+                                        Images& curr_images, const Sources& masks_sources, const std::vector<camera::Observation>& primary_obs,
                                         std::vector<camera::Observation>* secondary_obs = nullptr) final;
-  void GetTrackingResults(MulticamObservations& observations) final;
+  void GetTrackingResults(MulticamObservations& observations, const Sources& masks_sources, const Images& images) final;
 
   void StartKeyframe() final;
 };

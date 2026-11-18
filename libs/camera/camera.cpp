@@ -163,46 +163,62 @@ bool FisheyeCameraModel::distort(const Vector2T& xy, Vector2T& normalized_uv) co
 }
 
 bool FisheyeCameraModel::undistort(const Vector2T& normalized_uv, Vector2T& xy) const {
-  const float distorted_radius = normalized_uv.norm();
-  // Newton-Raphson method for finding successively better approximations to the roots of a real-valued function.
-  // let f(r) = compute_distorted_radius(r) - distorted_radius =>
-  //     f'(r) = compute_distorted_radius_derivative(r) =>
-  //  we need to find r: f(r) = 0     //
-
-  constexpr int max_n_iters = 10;                      // maximum number of iterations
-  constexpr float precision = (1.f / 1000.f) / 100.f;  // about 1/100 of the pixel for F = 1000px
-
-  float r = distorted_radius;  // undistorted_radius - initial guess
-  int n_iters = 0;
-  float previous_step_size = std::numeric_limits<float>::max();
-  float df;  // = f'(r)
-  constexpr float eps = std::numeric_limits<float>::epsilon();
-
-  while ((previous_step_size > precision) && (n_iters < max_n_iters)) {
-    // STEP 1: check current solution
-    const float f = compute_distorted_radius(r) - distorted_radius;
-    if (std::abs(f) <= eps) {
-      break;  // solution was found
-    }
-
-    // STEP 2: compute derivatives
-    if (!compute_distorted_radius_derivative(r, df)) {
-      return false;
-    }
-    if (std::abs(df) < eps) {
-      // local maximum/minimum but solution wasn't find
-      assert(std::abs(compute_distorted_radius(r) - distorted_radius) > eps);  // solution is not found
-      return false;
-    }
-
-    // STEP 3: make new step
-    const float prev_r = r;
-    r -= f / df;
-    previous_step_size = std::abs(r - prev_r);
-    ++n_iters;
+  const float radius = normalized_uv.norm();
+  if (!std::isfinite(radius)) {
+    return false;
   }
-  xy = r * normalized_uv.normalized();
-  return n_iters < max_n_iters;
+  if (radius <= std::numeric_limits<float>::epsilon()) {
+    xy = normalized_uv;
+    return true;
+  }
+  // Keep the inexpensive Newton path for typical pixels, but check the residual.
+  constexpr float tolerance = std::numeric_limits<float>::epsilon();
+  float r = radius;
+  for (int i = 0; i < 10; ++i) {
+    const float residual = compute_distorted_radius(r) - radius;
+    if (std::abs(residual) <= tolerance) {
+      xy = r * normalized_uv.normalized();
+      return true;
+    }
+    float slope = 0;
+    if (!compute_distorted_radius_derivative(r, slope) || !(slope > tolerance)) {
+      break;
+    }
+    r -= residual / slope;
+    if (!std::isfinite(r) || r <= 0.f) {
+      break;
+    }
+  }
+
+  // In theta coordinates the derivative does not vanish merely because the ray
+  // approaches 90 degrees. A Bernstein bound certifies monotonicity on this
+  // interval; do not bisect across a fold in the calibration polynomial.
+  constexpr double limit = 1.57079632679489661923;
+  const double t = limit * limit;
+  const double a = 3. * K1_ * t, b = 5. * K2_ * t * t;
+  const double c = 7. * K3_ * t * t * t, d = 9. * K4_ * t * t * t * t;
+  if (!(1 + a / 4 > 0 && 1 + a / 2 + b / 6 > 0 &&
+        1 + 3 * a / 4 + b / 2 + c / 4 > 0 && 1 + a + b + c + d > 0)) {
+    return false;
+  }
+  const auto distortion = [&](double theta) {
+    const double t2 = theta * theta;
+    return theta * (1. + t2 * (K1_ + t2 * (K2_ + t2 * (K3_ + t2 * K4_))));
+  };
+  if (radius >= distortion(limit)) {
+    return false;
+  }
+  double lo = 0., hi = limit;
+  for (int i = 0; i < 39; ++i) {
+    const double mid = (lo + hi) / 2.;
+    if (distortion(mid) < radius) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  xy = (std::tan((lo + hi) / 2.) * normalized_uv.cast<double>() / radius).cast<float>();
+  return xy.allFinite();
 }
 
 CameraModelWithJacobianBasedUndistortion::CameraModelWithJacobianBasedUndistortion(const Vector2T& resolution,

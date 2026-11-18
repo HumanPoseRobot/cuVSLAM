@@ -48,9 +48,9 @@ public:
 protected:
   virtual void LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId secondary_id, const Sources& curr_sources,
                                                 Images& curr_images,
-                                                const std::vector<camera::Observation>& primary_obs,
+                                                const Sources& masks_sources, const std::vector<camera::Observation>& primary_obs,
                                                 std::vector<camera::Observation>* secondary_obs = nullptr) = 0;
-  virtual void GetTrackingResults(MulticamObservations& observations) = 0;
+  virtual void GetTrackingResults(MulticamObservations& observations, const Sources& masks_sources, const Images& images) = 0;
   virtual void StartKeyframe() = 0;
 
   struct TracksVectorAndCam {

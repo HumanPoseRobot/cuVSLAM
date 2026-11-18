@@ -17,7 +17,7 @@
 
 #include "camera/observation.h"
 
-#include "math/sigmapoint.h"
+#include <Eigen/Cholesky>
 
 namespace {
 
@@ -66,19 +66,44 @@ Matrix2T ObservationInfoUVToNormUV(const ICameraModel& intrinsics, const Matrix2
   return invJacobian * info_uv * invJacobian;
 }
 
-// xy must be equal to output of intrinsics.normalizePoint(uv)
-Matrix2T ObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv, const Vector2T& xy,
-                               const Matrix2T& info_uv) {
-  Matrix2T cov = info_uv.inverse();
-  Matrix2T cov_xy = math::approximate<2, 2>(
-      uv, xy, cov,
-      [&intrinsics](const Vector2T& in) {
-        Vector2T out;
-        intrinsics.normalizePoint(in, out);
-        return out;
-      },
-      true /* is_lambda_affine */);
-  return cov_xy.inverse();
+bool TryObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv,
+                              const Matrix2T& info_uv, Vector2T& xy, Matrix2T& info_xy) {
+  if (!intrinsics.normalizePoint(uv, xy) || !info_uv.allFinite()) {
+    return false;
+  }
+  const Eigen::Matrix2d w = .5 * (info_uv.cast<double>() + info_uv.transpose().cast<double>());
+  const Eigen::LLT<Eigen::Matrix2d> pixel_factor(w);
+  if (pixel_factor.info() != Eigen::Success) {
+    return false;
+  }
+  const Eigen::Matrix2d axes = pixel_factor.matrixU().solve(Eigen::Matrix2d::Identity());
+  Eigen::Matrix2d cov = Eigen::Matrix2d::Zero();
+  for (int axis = 0; axis < 2; ++axis) {
+    // Use a centered approximation of the local derivative. When the pixel is
+    // near the model boundary, use a shorter valid stencil along this axis.
+    double scale = 1.;
+    bool usable = false;
+    for (int i = 0; i < 5; ++i, scale *= .5) {
+      const Vector2T delta = (scale * axes.col(axis)).cast<float>();
+      Vector2T plus, minus;
+      if (intrinsics.normalizePoint(uv + delta, plus) && intrinsics.normalizePoint(uv - delta, minus)) {
+        const Eigen::Vector2d j = (plus.cast<double>() - minus.cast<double>()) / (2 * scale);
+        cov.noalias() += j * j.transpose();
+        usable = true;
+        break;
+      }
+    }
+    if (!usable) {
+      return false;
+    }
+  }
+  const Eigen::LLT<Eigen::Matrix2d> normalized_factor(cov);
+  if (!cov.allFinite() || normalized_factor.info() != Eigen::Success) {
+    return false;
+  }
+  info_xy = normalized_factor.solve(Eigen::Matrix2d::Identity()).cast<float>();
+  return info_xy.allFinite() && info_xy(0, 0) > 0 &&
+         info_xy.cast<double>().determinant() > 0;
 }
 
 }  // namespace cuvslam::camera

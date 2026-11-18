@@ -21,6 +21,7 @@
 #include "common/isometry_utils.h"
 #include "sof/internal/sof_multicamera_gpu.h"
 #include "sof/sof_create.h"
+#include "sof/internal/stereo_mask.h"
 
 namespace cuvslam::sof {
 
@@ -68,7 +69,7 @@ MultiSOFGPU::MultiSOFGPU(const camera::Rig& rig, const camera::FrustumIntersecti
 
 void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId secondary_id,
                                                    const Sources& curr_sources, Images& curr_images,
-                                                   const std::vector<camera::Observation>& primary_obs,
+                                                   const Sources&, const std::vector<camera::Observation>& primary_obs,
                                                    std::vector<camera::Observation>* /* secondary_obs */) {
   const ImageContextPtr primary_image = curr_images[primary_id];
   const ImageSource& secondary_source = curr_sources[secondary_id];
@@ -94,25 +95,29 @@ void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
     const Vector2T& xyL = trackL.xy;
 
     TrackData& data = tracks_data[i];
+    data.track = {0.f, 0.f};
+    data.offset = {0.f, 0.f};
+    data.track_status = false;
+    data.search_radius_px = -1.f;
+    data.ncc_threshold = 0.8f;
     Vector2T uvL;
-    intrinsicsP.denormalizePoint(xyL, uvL);
+    if (!intrinsicsP.denormalizePoint(xyL, uvL) || !uvL.allFinite()) {
+      continue;
+    }
 
     const Vector3T ray_in_secondary = secondary_from_primary.linear() * xyL.homogeneous();
     const float z = ray_in_secondary.z();
 
     data.track = {uvL.x(), uvL.y()};
-    data.track_status = false;
-    data.ncc_threshold = 0.8f;
-
     if (z < 1e-8) {
-      data.offset = {0.f, 0.f};
-      data.search_radius_px = 0.f;
       continue;
     }
 
     const Vector2T xyR_init(ray_in_secondary.x() / z, ray_in_secondary.y() / z);
     Vector2T uvR_init;
-    intrinsicsS.denormalizePoint(xyR_init, uvR_init);
+    if (!intrinsicsS.denormalizePoint(xyR_init, uvR_init) || !uvR_init.allFinite()) {
+      continue;
+    }
 
     const Vector2T offset = uvR_init - uvL;
     data.offset = {offset.x(), offset.y()};
@@ -131,7 +136,7 @@ void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
   tracker.was_launched = true;
 }
 
-void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations) {
+void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations, const Sources& masks_sources, const Images& images) {
   std::vector<std::vector<camera::Observation>> secondary_observations(observations.size());
   const auto& primary_cams = fid_.primary_cameras();
 
@@ -154,6 +159,7 @@ void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations) {
       const camera::ICameraModel& intrinsicsS = *rig_.intrinsics[secondary_id];
 
       cudaStreamSynchronize(stream.get_stream());
+      const StereoMask target(masks_sources[secondary_id], images[secondary_id]->get_image_meta());
 
       Matrix2T info;
       Vector2T xyR;
@@ -167,10 +173,10 @@ void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations) {
         if (data.track_status) {
           uvR << data.track.x, data.track.y;
           info << data.info[0], data.info[1], data.info[2], data.info[3];
-          intrinsicsS.normalizePoint(uvR, xyR);
-
-          secondary_observations[secondary_id].push_back(
-              {secondary_id, trackId, xyR, camera::ObservationInfoUVToXY(intrinsicsS, uvR, xyR, info)});
+          Matrix2T info_xy;
+          if (target.accepts(uvR) && camera::TryObservationInfoUVToXY(intrinsicsS, uvR, info, xyR, info_xy)) {
+            secondary_observations[secondary_id].emplace_back(secondary_id, trackId, xyR, info_xy);
+          }
         }
       }
     }

@@ -47,7 +47,7 @@ bool FindObservation(const std::vector<Observation>& observations, TrackId track
 Matrix2T GetDefaultObservationInfoUV();
 
 Matrix2T ObservationInfoUVToNormUV(const ICameraModel& intrinsics, const Matrix2T& info_uv);
-Matrix2T ObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv, const Vector2T& xy,
-                               const Matrix2T& info_uv);
+bool TryObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv,
+                              const Matrix2T& info_uv, Vector2T& xy, Matrix2T& info_xy);
 
 }  // namespace cuvslam::camera
