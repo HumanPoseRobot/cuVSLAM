@@ -44,8 +44,15 @@ FetchContent_Declare(
     cunls
     URL https://github.com/nvidia-isaac/cuNLS/archive/refs/tags/${CUNLS_VERSION}.tar.gz
     URL_HASH SHA256=23b2917ae3903e6a688edb1652e40202d314527cd7fa9db68c762f0429375f77
-    PATCH_COMMAND sed -i "s/cmake_minimum_required(VERSION 3.24)/cmake_minimum_required(VERSION 3.22)/" CMakeLists.txt
+    PATCH_COMMAND "${CMAKE_COMMAND}" -DCUNLS_SOURCE_DIR=<SOURCE_DIR>
+                  -P "${CMAKE_CURRENT_LIST_DIR}/configure_cunls_toolchain.cmake"
 )
+# FetchContent skips PATCH_COMMAND for explicit source overrides.
+if(FETCHCONTENT_SOURCE_DIR_CUNLS)
+    execute_process(COMMAND "${CMAKE_COMMAND}" "-DCUNLS_SOURCE_DIR=${FETCHCONTENT_SOURCE_DIR_CUNLS}"
+                            -P "${CMAKE_CURRENT_LIST_DIR}/configure_cunls_toolchain.cmake"
+                    COMMAND_ERROR_IS_FATAL ANY)
+endif()
 FetchContent_MakeAvailable(cunls)
 
 # Apply to both downloaded sources and FETCHCONTENT_SOURCE_DIR_CUNLS overrides.

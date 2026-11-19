@@ -8,6 +8,7 @@
 |---|---|
 | `libs/pipelines/imu_fusion_context.cpp` | 将前台发布验收覆盖扩展到双目，避免双目跳过速度、偏置及观测检查。 |
 | `cmake/ext/cunls_runtime_compat.patch` | 保存已验证依赖中的 `<cstdlib>`、CUDA 头文件兼容声明，以及 PCG 两次共享存储归约之间的同步屏障，消除源码重建漏带修复的风险。 |
+| `cmake/ext/configure_cunls_toolchain.cmake` | 在依赖配置前移除写死的 CUDA 编译器并保留父项目架构选择，避免不同版本头文件混用。 |
 | `cmake/ext/cunls.cmake` | 对下载与本地覆盖的 cuNLS 都按顺序、幂等应用两份补丁，失败时停止配置。 |
 | `examples/halo_vio/camera_orientation.py` | 按提供的 YAML 核验 0°/180°几何假设、独立帧支持和旋转矩阵有效性，避免重复应用固件旋转。 |
 | `examples/halo_vio/run.py` | 把预检放在 SDK 加载之前；支持原始与规范化录像目录、明确的旧名义时钟适配和审计输出。 |
