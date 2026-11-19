@@ -1,0 +1,20 @@
+{
+  "data_test2_validated": {
+    "camera_time_offsets_s": [
+      -0.0055,
+      -0.004656218695898521,
+      -0.0047981480290696125,
+      -0.004649456023684627
+    ],
+    "basis": "Previously locked data_test2 profile. Cam0 raw timestamp phase differs by about 14ms; not a generic device default."
+  },
+  "halo856_shared_cam23": {
+    "camera_time_offsets_s": [
+      -0.0004651033717956547,
+      -0.000569335772703447,
+      -0.0005444953277776235,
+      -0.0005444953277776235
+    ],
+    "basis": "HALO856 same-frame stereo check supports hardware-synchronous cam2/cam3. Cam3 YAML has a one-frame timing discrepancy; use the cam2 calibrated IMU offset explicitly."
+  }
+}

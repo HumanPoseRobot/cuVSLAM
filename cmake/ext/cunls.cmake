@@ -51,19 +51,23 @@ FetchContent_MakeAvailable(cunls)
 # Apply to both downloaded sources and FETCHCONTENT_SOURCE_DIR_CUNLS overrides.
 # The reverse check makes repeat configuration safe without masking patch failures.
 find_program(CUNLS_PATCH_EXECUTABLE NAMES patch REQUIRED)
-set(_cunls_fixed_order_patch "${CMAKE_CURRENT_LIST_DIR}/cunls_fixed_order.patch")
-execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --dry-run --batch --forward -R -p1
-                        -i "${_cunls_fixed_order_patch}"
-                WORKING_DIRECTORY "${cunls_SOURCE_DIR}"
-                RESULT_VARIABLE _cunls_patch_applied OUTPUT_QUIET ERROR_QUIET)
-if(NOT _cunls_patch_applied EQUAL 0)
-    execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --dry-run --batch --forward -p1
-                            -i "${_cunls_fixed_order_patch}"
-                    WORKING_DIRECTORY "${cunls_SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
-    execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --batch --forward -p1
-                            -i "${_cunls_fixed_order_patch}"
-                    WORKING_DIRECTORY "${cunls_SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
-endif()
+# The second patch reproduces the tested CUDA-12 header compatibility and
+# prevents shared reduction scratch storage from being overwritten by another warp.
+foreach(_cunls_patch_name IN ITEMS cunls_fixed_order.patch cunls_runtime_compat.patch)
+    set(_cunls_patch "${CMAKE_CURRENT_LIST_DIR}/${_cunls_patch_name}")
+    execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --dry-run --batch --forward -R -p1
+                            -i "${_cunls_patch}"
+                    WORKING_DIRECTORY "${cunls_SOURCE_DIR}"
+                    RESULT_VARIABLE _cunls_patch_applied OUTPUT_QUIET ERROR_QUIET)
+    if(NOT _cunls_patch_applied EQUAL 0)
+        execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --dry-run --batch --forward -p1
+                                -i "${_cunls_patch}"
+                        WORKING_DIRECTORY "${cunls_SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
+        execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --batch --forward -p1
+                                -i "${_cunls_patch}"
+                        WORKING_DIRECTORY "${cunls_SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
+    endif()
+endforeach()
 
 if(NOT TARGET cunls)
     message(FATAL_ERROR "cuNLS source build did not define the 'cunls' target")

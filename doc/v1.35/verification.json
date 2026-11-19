@@ -1,0 +1,13 @@
+{
+  "sequences": 14,
+  "frames": 22422,
+  "valid_frames": 22422,
+  "gravity_initialized_sequences": 13,
+  "loss_segments": 0,
+  "gravity_gap_segments": 0,
+  "maximum_single_frame_step_m": 0.07538127090740927,
+  "runtime_library_sha256": "fa4c1da7ee41f84399127e22b0e77b1af5220efabc0d6e74db440224c7f90d32",
+  "all_pgo_disabled": true,
+  "all_ply_sizes_match_headers": true,
+  "vio_guided_cloud_points": 12096963
+}

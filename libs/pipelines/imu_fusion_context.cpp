@@ -528,7 +528,9 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
   joint_active_ = joint_enabled_ && planes.empty() && depth_points.empty() &&
                   std::none_of(depth_infos.begin(), depth_infos.end(), [](auto p) { return p != nullptr; });
   if (joint_active_) {
-    const bool guarded = rig_.num_cameras > 2;
+    // Stereo uses the same publication guard as larger rigs. Otherwise a rejected
+    // inertial candidate can escape validation and seed the next prediction.
+    const bool guarded = rig_.num_cameras >= 2;
     sba_imu::Pose prediction;
     bool prediction_valid = false, conservative_update = false;
     has_joint_prior_ = interval_healthy && solve_joint(calib_, rig_, landmarks, observations, *maybe_gravity,

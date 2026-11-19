@@ -1,0 +1,39 @@
+--- a/cunls/common/types.h
++++ b/cunls/common/types.h
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ /*
+  * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+  * All rights reserved. SPDX-License-Identifier: Apache-2.0
+--- a/cunls/linear_solver/block_sparse_pcg_solver.cu
++++ b/cunls/linear_solver/block_sparse_pcg_solver.cu
+@@ -96,6 +96,8 @@
+ #include "cunls/linear_solver/block_sparse_pcg_solver.h"
+ #include "cunls/minimizer/problem.h"
+ #include "cunls/state/state_batch.h"
++
++extern "C" decltype(cusparseSpMV) cusparseSpMV_preprocess;
+ 
+ namespace cunls {
+ 
+@@ -733,6 +735,9 @@
+     sac += ai * c[i];
+   }
+   ReduceAndAddToScalar(sab, out_ab);
++  // The helper reuses shared warp_sums. All warps must wait until warp 0
++  // has consumed the first reduction before any lane overwrites that storage.
++  __syncthreads();
+   ReduceAndAddToScalar(sac, out_ac);
+ }
+ 
+--- a/cunls/minimizer/sparse_matrix.cu
++++ b/cunls/minimizer/sparse_matrix.cu
+@@ -35,6 +35,8 @@
+ 
+ #define WARP_SIZE 32
+ 
++extern "C" decltype(cusparseSpMV) cusparseSpMV_preprocess;
++
+ namespace cunls {
+ 
+ /**
