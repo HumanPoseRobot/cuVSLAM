@@ -1,0 +1,4 @@
+v1.35-r1: epipolar update consistency plus actual VIO output acceptance and LM finite-quality fixes.
+Original v1.35 tag/package remain preserved.
+The enclosed six full replay results are pre-release candidate verification and must not be described as the post-commit full dataset release run.
+Known pre-existing common_test SVD seed37027 failure reproduces identically on original v1.35 and candidate; see REPORT.txt.

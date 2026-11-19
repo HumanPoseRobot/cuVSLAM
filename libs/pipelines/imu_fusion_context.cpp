@@ -1,6 +1,22 @@
+/*
+ * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+ *
+ * NVIDIA software released under the NVIDIA Community License is intended to be used to enable
+ * the further development of AI and robotics technologies. Such software has been designed, tested,
+ * and optimized for use with NVIDIA hardware, and this License grants permission to use the software
+ * solely with such hardware.
+ * Subject to the terms of this License, NVIDIA confirms that you are free to commercially use,
+ * modify, and distribute the software with NVIDIA hardware. NVIDIA does not claim ownership of any
+ * outputs generated using the software or derivative works thereof. Any code contributions that you
+ * share with NVIDIA are licensed to NVIDIA as feedback under this License and may be incorporated
+ * in future releases without notice or attribution.
+ * By using, reproducing, modifying, distributing, performing, or displaying any portion or element
+ * of the software or derivative works thereof, you agree to be bound by this License.
+ */
+
 #include <chrono>
-#include "gpu_joint_adapter.h"
 #include "gpu_bias_rw_adapter.h"
+#include "gpu_joint_adapter.h"
 #include "pipelines/gpu_window/frontend_guard_adapter.h"
 
 /*
@@ -19,17 +35,17 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
-#include "pipelines/imu_fusion_context.h"
-#include "imu_runtime_options.h"
-#include "imu_initialization_validation.h"
-#include "imu/world_velocity.h"
 #include "imu/soft_inertial_pnp.h"
+#include "imu/world_velocity.h"
+#include "imu_initialization_validation.h"
+#include "imu_runtime_options.h"
+#include "pipelines/imu_fusion_context.h"
 
 #include <algorithm>
 #include <array>
 #include <cstdlib>
-#include <string_view>
 #include <stdexcept>
+#include <string_view>
 
 #include "common/include_eigen.h"
 #include "common/vector_2t.h"
@@ -82,17 +98,16 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
 // Re-seed after visual bootstrap or an external keyframe correction without reusing stale cross terms.
 void seed_joint_prior(sba_imu::Pose& pose) {
   Vector15T information;
-  information << 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f,
-                 1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f;
+  information << 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f, 1e4f, 1e4f, 1e4f, 25.f, 25.f, 25.f;
   pose.info = information.asDiagonal();
 }
 
 // Estimate a translation proposal from minimal subsets of existing
 // 2D-to-3D associations. Keep the IMU orientation fixed for hypothesis
 // generation; the full VI solve and publication gate still refine/check it.
-std::optional<sba_imu::Pose> reacquire_translation(
-    const imu::ImuCalibration& calib, const sba_imu::StereoPnPInput& input,
-    const sba_imu::Pose& prediction, int64_t time_ns) {
+std::optional<sba_imu::Pose> reacquire_translation(const imu::ImuCalibration& calib,
+                                                   const sba_imu::StereoPnPInput& input,
+                                                   const sba_imu::Pose& prediction, int64_t time_ns) {
   struct Row {
     Eigen::Matrix<float, 2, 3> J;
     Vector2T rhs, focal;
@@ -111,8 +126,7 @@ std::optional<sba_imu::Pose> reacquire_translation(
     if (!pc.allFinite() || !uv.allFinite() || pc.z() <= input.min_depth) continue;
     Eigen::Matrix<float, 2, 3> project;
     project << 1, 0, -uv.x(), 0, 1, -uv.y();
-    rows.push_back({project * cw.linear(), project * pc,
-                    input.rig.intrinsics[c]->getFocal(), pc, cw.linear()});
+    rows.push_back({project * cw.linear(), project * pc, input.rig.intrinsics[c]->getFocal(), pc, cw.linear()});
   }
   if (rows.size() < 12) return std::nullopt;
   auto count = [&](const Vector3T& delta) {
@@ -120,7 +134,8 @@ std::optional<sba_imu::Pose> reacquire_translation(
     for (const Row& row : rows) {
       const Vector3T pc = row.pc - row.camera_from_world * delta;
       if (pc.z() > input.min_depth &&
-          ((row.rhs - row.J * delta).cwiseProduct(row.focal)).squaredNorm() <= 16.f * pc.z() * pc.z()) ++n;
+          ((row.rhs - row.J * delta).cwiseProduct(row.focal)).squaredNorm() <= 16.f * pc.z() * pc.z())
+        ++n;
     }
     return n;
   };
@@ -130,24 +145,29 @@ std::optional<sba_imu::Pose> reacquire_translation(
   // Deterministic sampling avoids adding a wall-clock seeded variable to replay.
   uint32_t rng = 0x9834a9d3u;
   auto next = [&]() {
-    rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
     return rng % rows.size();
   };
   for (int k = 0; k < 128; ++k) {
     const size_t i = next(), j = next();
     if (i == j) continue;
-    const Row& a = rows[i]; const Row& b = rows[j];
-    const Matrix3T H = a.J.transpose()*a.J + b.J.transpose()*b.J;
+    const Row& a = rows[i];
+    const Row& b = rows[j];
+    const Matrix3T H = a.J.transpose() * a.J + b.J.transpose() * b.J;
     Eigen::LDLT<Matrix3T> ldlt(H);
-    if (ldlt.info()!=Eigen::Success || !ldlt.isPositive() ||
-        ldlt.vectorD().minCoeff() < 1e-3f) continue;
-    const Vector3T delta = ldlt.solve(a.J.transpose()*a.rhs + b.J.transpose()*b.rhs);
-    if (!delta.allFinite() || delta.squaredNorm() > .15f*.15f) continue;
+    if (ldlt.info() != Eigen::Success || !ldlt.isPositive() || ldlt.vectorD().minCoeff() < 1e-3f) continue;
+    const Vector3T delta = ldlt.solve(a.J.transpose() * a.rhs + b.J.transpose() * b.rhs);
+    if (!delta.allFinite() || delta.squaredNorm() > .15f * .15f) continue;
     const int n = count(delta);
-    if (n > best_count) { best_count = n; best = delta; }
+    if (n > best_count) {
+      best_count = n;
+      best = delta;
+    }
   }
-  TraceMessage("FRONTEND_REACQUIRE t=%lld prediction=%d consensus=%d candidates=%zu shift=%.6f",
-               (long long)time_ns,baseline,best_count,rows.size(),best.norm());
+  TraceMessage("FRONTEND_REACQUIRE t=%lld prediction=%d consensus=%d candidates=%zu shift=%.6f", (long long)time_ns,
+               baseline, best_count, rows.size(), best.norm());
   if (best_count < 12 || best_count < baseline + 3) return std::nullopt;
   auto proposal = prediction;
   proposal.w_from_imu.translation() += best;
@@ -157,14 +177,16 @@ std::optional<sba_imu::Pose> reacquire_translation(
 bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
                  const std::unordered_map<TrackId, Vector3T>& landmarks,
                  const std::vector<camera::Observation>& observations, const Vector3T& gravity,
-                 const InertialPnPSettings& settings, sba_imu::Pose left, bool have_prior,
-                 sba_imu::Pose& result, int64_t time_ns, bool enforce_guard, sba_imu::Pose& guarded_prediction, bool& prediction_valid, bool& conservative_update) {
-  conservative_update=false;
+                 const InertialPnPSettings& settings, sba_imu::Pose left, bool have_prior, sba_imu::Pose& result,
+                 int64_t time_ns, bool enforce_guard, sba_imu::Pose& guarded_prediction, bool& prediction_valid,
+                 bool& conservative_update) {
+  conservative_update = false;
   if (!have_prior) seed_joint_prior(left);
   sba_imu::Pose right;
   if (!left.predict_pose(gravity, left.preintegration, right)) return false;
   auto prediction = right;
-  prediction_valid = enforce_guard && frontend_guard::propagate(left,prediction) && prediction.w_from_imu.matrix().allFinite() && prediction.velocity.allFinite();
+  prediction_valid = enforce_guard && frontend_guard::propagate(left, prediction) &&
+                     prediction.w_from_imu.matrix().allFinite() && prediction.velocity.allFinite();
   guarded_prediction = prediction;
   sba_imu::StereoPnPInput input;
   input.rig = rig;
@@ -190,8 +212,9 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
     input.observation_xys.push_back(obs.xy);
     input.observation_infos.push_back(9.f * obs.xy_info);
   }
-  if (enforce_guard) TraceMessage("FRONTEND_ASSOC t=%lld optical=%zu matched=%zu",
-                                 (long long)time_ns,observations.size(),input.points.size());
+  if (enforce_guard)
+    TraceMessage("FRONTEND_ASSOC t=%lld optical=%zu matched=%zu", (long long)time_ns, observations.size(),
+                 input.points.size());
   const bool enough = settings.min_observations > 0 && settings.max_iteration > 0 &&
                       input.points.size() >= static_cast<size_t>(settings.min_observations);
   static size_t audit_frame = 0;
@@ -202,12 +225,16 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
     } catch (const std::runtime_error& error) {
       // Preserve the strict diagnostic threshold. A disagreement uses the
       // existing CPU solver for this frame; CUDA/runtime errors still propagate.
-      if (std::string_view(error.what()) != "GPU VI equivalence gate failed") { throw; }
+      if (std::string_view(error.what()) != "GPU VI equivalence gate failed") {
+        throw;
+      }
       audit_ok = false;
       TraceMessage("GPU_VI_AUDIT_FALLBACK t=%lld backend=cpu", static_cast<long long>(time_ns));
     }
   }
-  const bool gpu_requested = std::getenv("CUVSLAM_JOINT_BACKEND") && (std::string_view(std::getenv("CUVSLAM_JOINT_BACKEND")) == "gpu" || std::string_view(std::getenv("CUVSLAM_JOINT_BACKEND")) == "window");
+  const bool gpu_requested =
+      std::getenv("CUVSLAM_JOINT_BACKEND") && (std::string_view(std::getenv("CUVSLAM_JOINT_BACKEND")) == "gpu" ||
+                                               std::string_view(std::getenv("CUVSLAM_JOINT_BACKEND")) == "window");
   const bool gpu_mode = gpu_requested && audit_ok;
   const bool gpu_shadow = enough && !gpu_requested && audit_ok && audit_frame % 60 == 1;
   const auto original_left = left;
@@ -219,19 +246,22 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
   bool solved = false;
   if (gpu_mode) {
     solved = gpu_ok;
-    if (solved) { left = gpu_left; right = gpu_right; }
+    if (solved) {
+      left = gpu_left;
+      right = gpu_right;
+    }
   } else {
     solved = enough && SoftInertialPnP(calib, input, left, right, input.imu_penalty);
   }
   if (gpu_shadow && solved && gpu_ok) {
     TraceMessage("GPU_VI_SOLVE_SHADOW dp=%.9g dv=%.9g dbg=%.9g dba=%.9g info_rel=%.9g",
-      (right.w_from_imu.translation()-gpu_right.w_from_imu.translation()).norm(),
-      (right.velocity-gpu_right.velocity).norm(),(right.gyro_bias-gpu_right.gyro_bias).norm(),
-      (right.acc_bias-gpu_right.acc_bias).norm(),(right.info-gpu_right.info).norm()/std::max(1.f,right.info.norm()));
+                 (right.w_from_imu.translation() - gpu_right.w_from_imu.translation()).norm(),
+                 (right.velocity - gpu_right.velocity).norm(), (right.gyro_bias - gpu_right.gyro_bias).norm(),
+                 (right.acc_bias - gpu_right.acc_bias).norm(),
+                 (right.info - gpu_right.info).norm() / std::max(1.f, right.info.norm()));
   }
-  bool ok = solved &&
-                  right.w_from_imu.matrix().allFinite() && right.velocity.allFinite() &&
-                  right.gyro_bias.allFinite() && right.acc_bias.allFinite() && right.info.allFinite();
+  bool ok = solved && right.w_from_imu.matrix().allFinite() && right.velocity.allFinite() &&
+            right.gyro_bias.allFinite() && right.acc_bias.allFinite() && right.info.allFinite();
   if (enforce_guard && ok && prediction_valid && enough) {
     auto support = [&](const sba_imu::Pose& pose, sba_imu::StereoPnPInput* subset) {
       const Isometry3T rw = calib.rig_from_imu() * pose.w_from_imu.inverse();
@@ -243,15 +273,15 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
         subset->observation_infos.clear();
       }
       int inliers = 0;
-      for (size_t i=0; i<input.points.size(); ++i) {
-        const auto c=input.camera_ids[i];
-        const Vector3T pc=rig.camera_from_rig[c]*rw*input.points[i];
-        if (!pc.allFinite() || pc.z()<=input.min_depth) continue;
-        const Vector2T e=pc.hnormalized()-input.observation_xys[i];
-        const Vector2T px=e.cwiseProduct(rig.intrinsics[c]->getFocal());
-        const float chi=e.dot(input.observation_infos[i]*e);
-        if (chi<=9.21f && px.squaredNorm()<=64.f) ++inliers;
-        if (!subset || !(chi<=25.f && px.squaredNorm()<=64.f)) continue;
+      for (size_t i = 0; i < input.points.size(); ++i) {
+        const auto c = input.camera_ids[i];
+        const Vector3T pc = rig.camera_from_rig[c] * rw * input.points[i];
+        if (!pc.allFinite() || pc.z() <= input.min_depth) continue;
+        const Vector2T e = pc.hnormalized() - input.observation_xys[i];
+        const Vector2T px = e.cwiseProduct(rig.intrinsics[c]->getFocal());
+        const float chi = e.dot(input.observation_infos[i] * e);
+        if (chi <= 9.21f && px.squaredNorm() <= 64.f) ++inliers;
+        if (!subset || !(chi <= 25.f && px.squaredNorm() <= 64.f)) continue;
         subset->point_ids.push_back(static_cast<int>(subset->points.size()));
         subset->points.push_back(input.points[i]);
         subset->camera_ids.push_back(c);
@@ -260,33 +290,34 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
       }
       return inliers;
     };
-    const int old_support=support(right,nullptr);
-    if (3*old_support<static_cast<int>(input.points.size())) {
-      auto proposal=reacquire_translation(calib,input,prediction,time_ns);
-      auto retry_right=proposal && support(*proposal,nullptr)>old_support ? *proposal : right;
-      auto subset=input;
-      support(retry_right,&subset);
-      if (subset.points.size()>=20) {
-        auto retry_left=original_left;
-        const bool solved_refine=gpu_mode
-            ? sba_imu::SolveGpuBiasRW(calib,subset,retry_left,retry_right,1e-3f)
-            : SoftInertialPnP(calib,subset,retry_left,retry_right,1e-3f);
-        const int improved=solved_refine ? support(retry_right,nullptr) : 0;
-        const bool accepted=improved>=old_support+5 &&
-            frontend_guard::validate(calib,rig,landmarks,observations,prediction,retry_right,
-                                     settings.min_observations,original_left.preintegration.dT_s,
-                                     time_ns,"early_consensus");
-        TraceMessage("FRONTEND_EARLY_CONSENSUS t=%lld before=%d after=%d accept=%d",
-                     (long long)time_ns,old_support,improved,int(accepted));
+    const int old_support = support(right, nullptr);
+    if (3 * old_support < static_cast<int>(input.points.size())) {
+      auto proposal = reacquire_translation(calib, input, prediction, time_ns);
+      auto retry_right = proposal && support(*proposal, nullptr) > old_support ? *proposal : right;
+      auto subset = input;
+      support(retry_right, &subset);
+      if (subset.points.size() >= 20) {
+        auto retry_left = original_left;
+        const bool solved_refine = gpu_mode ? sba_imu::SolveGpuBiasRW(calib, subset, retry_left, retry_right, 1e-3f)
+                                            : SoftInertialPnP(calib, subset, retry_left, retry_right, 1e-3f);
+        const int improved = solved_refine ? support(retry_right, nullptr) : 0;
+        const bool accepted = improved >= old_support + 5 &&
+                              frontend_guard::validate(calib, rig, landmarks, observations, prediction, retry_right,
+                                                       settings.min_observations, original_left.preintegration.dT_s,
+                                                       time_ns, "early_consensus");
+        TraceMessage("FRONTEND_EARLY_CONSENSUS t=%lld before=%d after=%d accept=%d", (long long)time_ns, old_support,
+                     improved, int(accepted));
         if (accepted) {
-          left=std::move(retry_left);
-          right=std::move(retry_right);
+          left = std::move(retry_left);
+          right = std::move(retry_right);
         }
       }
     }
   }
   if (enforce_guard) {
-    ok = ok && prediction_valid && frontend_guard::validate(calib,rig,landmarks,observations,prediction,right,settings.min_observations,original_left.preintegration.dT_s,time_ns,"foreground");
+    ok = ok && prediction_valid &&
+         frontend_guard::validate(calib, rig, landmarks, observations, prediction, right, settings.min_observations,
+                                  original_left.preintegration.dT_s, time_ns, "foreground");
     // Recovery is a new VI optimization, not clipping or blending an invalid result.
     // Keep identical measurements/prior/initial prediction, increase IMU trust only
     // in this branch, and require exactly the same acceptance checks afterwards.
@@ -296,51 +327,72 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
       // final candidate against ALL original observations and the IMU prediction.
       // A rejected full solve may already follow outliers. Try a consensus
       // around the independent IMU prediction before its visual proposal.
-      const auto reacquired = reacquire_translation(calib,input,prediction,time_ns);
-      for(int seed=0;seed<3&&!ok;++seed){
-      if (seed==2 && !reacquired) continue;
-      const auto& seed_pose=seed==0 ? prediction : (seed==1 ? right : *reacquired);
-      auto recovery_input=input;
-      recovery_input.points.clear();recovery_input.point_ids.clear();
-      recovery_input.camera_ids.clear();recovery_input.observation_xys.clear();recovery_input.observation_infos.clear();
-      const Isometry3T recovery_rig_from_world=calib.rig_from_imu()*seed_pose.w_from_imu.inverse();
-      for(size_t i=0;i<input.points.size();++i){
-        int cam=input.camera_ids[i];
-        const Vector3T pc=rig.camera_from_rig[cam]*recovery_rig_from_world*input.points[i];
-        if(!pc.allFinite()||pc.z()<=input.min_depth)continue;
-        const Vector2T e=pc.hnormalized()-input.observation_xys[i];
-        const float score=e.dot(input.observation_infos[i]*e);
-        if(!std::isfinite(score)||score>25.f||e.cwiseProduct(rig.intrinsics[cam]->getFocal()).norm()>8.f)continue;
-        recovery_input.point_ids.push_back(recovery_input.points.size());
-        recovery_input.points.push_back(input.points[i]);recovery_input.camera_ids.push_back(cam);
-        recovery_input.observation_xys.push_back(input.observation_xys[i]);recovery_input.observation_infos.push_back(input.observation_infos[i]);
-      }
-      TraceMessage("FRONTEND_CONSENSUS t=%lld seed=%s selected=%zu total=%zu",(long long)time_ns,seed==0?"prediction":(seed==1?"proposal":"reacquired"),recovery_input.points.size(),input.points.size());
-      for (float penalty : {1e-3f,1e-2f,1e-1f}) {
-        if(recovery_input.points.size()<12)break;
-        auto retry_left = original_left, retry_right = seed==2 ? seed_pose : prediction;
-        const auto limits=frontend_guard::correction_limits(original_left.preintegration.dT_s);
-        for(int group=0;group<3;++group) retry_left.info.block<3,3>(6+3*group,6+3*group).diagonal().array() += float(16./(limits[group]*limits[group]));
-        const bool solved_retry = gpu_mode
-            ? sba_imu::SolveGpuBiasRW(calib,recovery_input,retry_left,retry_right,penalty)
-            : SoftInertialPnP(calib,recovery_input,retry_left,retry_right,penalty);
-        bool accepted_retry = solved_retry && frontend_guard::validate(calib,rig,landmarks,observations,prediction,retry_right,settings.min_observations,original_left.preintegration.dT_s,time_ns,"recovery");
-        if(!accepted_retry&&solved_retry){
-          conservative_update=frontend_guard::validate(calib,rig,landmarks,observations,prediction,retry_right,settings.min_observations,original_left.preintegration.dT_s,time_ns,"recovery_degraded",true);
-          accepted_retry=conservative_update;
+      const auto reacquired = reacquire_translation(calib, input, prediction, time_ns);
+      for (int seed = 0; seed < 3 && !ok; ++seed) {
+        if (seed == 2 && !reacquired) continue;
+        const auto& seed_pose = seed == 0 ? prediction : (seed == 1 ? right : *reacquired);
+        auto recovery_input = input;
+        recovery_input.points.clear();
+        recovery_input.point_ids.clear();
+        recovery_input.camera_ids.clear();
+        recovery_input.observation_xys.clear();
+        recovery_input.observation_infos.clear();
+        const Isometry3T recovery_rig_from_world = calib.rig_from_imu() * seed_pose.w_from_imu.inverse();
+        for (size_t i = 0; i < input.points.size(); ++i) {
+          int cam = input.camera_ids[i];
+          const Vector3T pc = rig.camera_from_rig[cam] * recovery_rig_from_world * input.points[i];
+          if (!pc.allFinite() || pc.z() <= input.min_depth) continue;
+          const Vector2T e = pc.hnormalized() - input.observation_xys[i];
+          const float score = e.dot(input.observation_infos[i] * e);
+          if (!std::isfinite(score) || score > 25.f || e.cwiseProduct(rig.intrinsics[cam]->getFocal()).norm() > 8.f)
+            continue;
+          recovery_input.point_ids.push_back(recovery_input.points.size());
+          recovery_input.points.push_back(input.points[i]);
+          recovery_input.camera_ids.push_back(cam);
+          recovery_input.observation_xys.push_back(input.observation_xys[i]);
+          recovery_input.observation_infos.push_back(input.observation_infos[i]);
         }
-        TraceMessage("FRONTEND_REOPT t=%lld penalty=%.6g solved=%d accept=%d",(long long)time_ns,penalty,int(solved_retry),int(accepted_retry));
-        if (accepted_retry) {
-          // The temporary trust-region prior is not a new sensor measurement.
-          // Carry the propagated covariance (rotated to the accepted tangent),
-          // rather than accumulating artificial certainty from regularization.
-          frontend_guard::Matrix T=frontend_guard::Matrix::Identity();
-          Eigen::Matrix3d R=retry_right.w_from_imu.linear().cast<double>().transpose()*prediction.w_from_imu.linear().cast<double>();
-          T.block<3,3>(0,0)=R;T.block<3,3>(3,3)=R;
-          retry_right.info=(T*prediction.info.cast<double>()*T.transpose()).cast<float>();
-          left=std::move(retry_left);right=std::move(retry_right);ok=true;break;
+        TraceMessage("FRONTEND_CONSENSUS t=%lld seed=%s selected=%zu total=%zu", (long long)time_ns,
+                     seed == 0 ? "prediction" : (seed == 1 ? "proposal" : "reacquired"), recovery_input.points.size(),
+                     input.points.size());
+        for (float penalty : {1e-3f, 1e-2f, 1e-1f}) {
+          if (recovery_input.points.size() < 12) break;
+          auto retry_left = original_left, retry_right = seed == 2 ? seed_pose : prediction;
+          const auto limits = frontend_guard::correction_limits(original_left.preintegration.dT_s);
+          for (int group = 0; group < 3; ++group)
+            retry_left.info.block<3, 3>(6 + 3 * group, 6 + 3 * group).diagonal().array() +=
+                float(16. / (limits[group] * limits[group]));
+          const bool solved_retry =
+              gpu_mode ? sba_imu::SolveGpuBiasRW(calib, recovery_input, retry_left, retry_right, penalty)
+                       : SoftInertialPnP(calib, recovery_input, retry_left, retry_right, penalty);
+          bool accepted_retry =
+              solved_retry && frontend_guard::validate(calib, rig, landmarks, observations, prediction, retry_right,
+                                                       settings.min_observations, original_left.preintegration.dT_s,
+                                                       time_ns, "recovery");
+          if (!accepted_retry && solved_retry) {
+            conservative_update = frontend_guard::validate(calib, rig, landmarks, observations, prediction, retry_right,
+                                                           settings.min_observations, original_left.preintegration.dT_s,
+                                                           time_ns, "recovery_degraded", true);
+            accepted_retry = conservative_update;
+          }
+          TraceMessage("FRONTEND_REOPT t=%lld penalty=%.6g solved=%d accept=%d", (long long)time_ns, penalty,
+                       int(solved_retry), int(accepted_retry));
+          if (accepted_retry) {
+            // The temporary trust-region prior is not a new sensor measurement.
+            // Carry the propagated covariance (rotated to the accepted tangent),
+            // rather than accumulating artificial certainty from regularization.
+            frontend_guard::Matrix T = frontend_guard::Matrix::Identity();
+            Eigen::Matrix3d R = retry_right.w_from_imu.linear().cast<double>().transpose() *
+                                prediction.w_from_imu.linear().cast<double>();
+            T.block<3, 3>(0, 0) = R;
+            T.block<3, 3>(3, 3) = R;
+            retry_right.info = (T * prediction.info.cast<double>() * T.transpose()).cast<float>();
+            left = std::move(retry_left);
+            right = std::move(retry_right);
+            ok = true;
+            break;
+          }
         }
-      }
       }
     }
   }
@@ -349,23 +401,24 @@ bool solve_joint(const imu::ImuCalibration& calib, const camera::Rig& rig,
     if (cam != 0) camera_counts += ',';
     camera_counts += std::to_string(counts[cam]);
   }
-  TraceMessage("JOINT_FRAME t=%lld ok=%d cams=%s dp=%.8f dv=%.8f dbg=%.8f dba=%.8f",
-               static_cast<long long>(time_ns), static_cast<int>(ok), camera_counts.c_str(),
+  TraceMessage("JOINT_FRAME t=%lld ok=%d cams=%s dp=%.8f dv=%.8f dbg=%.8f dba=%.8f", static_cast<long long>(time_ns),
+               static_cast<int>(ok), camera_counts.c_str(),
                (right.w_from_imu.translation() - prediction.w_from_imu.translation()).norm(),
                (right.velocity - prediction.velocity).norm(), (right.gyro_bias - prediction.gyro_bias).norm(),
                (right.acc_bias - prediction.acc_bias).norm());
   if (ok && std::getenv("CUVSLAM_CAM01_TEMPORAL")) {
-    std::array<int,4> inliers{};
+    std::array<int, 4> inliers{};
     const Isometry3T corrected = calib.rig_from_imu() * right.w_from_imu.inverse();
-    for (size_t i=0; i<input.points.size(); ++i) {
+    for (size_t i = 0; i < input.points.size(); ++i) {
       const auto cam = input.camera_ids[i];
       const Vector3T pc = rig.camera_from_rig[cam] * corrected * input.points[i];
-      if (pc.z()<=input.min_depth) continue;
-      const Vector2T error = (pc.hnormalized()-input.observation_xys[i]).cwiseProduct(rig.intrinsics[cam]->getFocal());
+      if (pc.z() <= input.min_depth) continue;
+      const Vector2T error =
+          (pc.hnormalized() - input.observation_xys[i]).cwiseProduct(rig.intrinsics[cam]->getFocal());
       if (error.norm() <= 2.f) ++inliers[cam];
     }
-    TraceMessage("CAM01_QUALITY t=%lld inliers=%d,%d,%d,%d",static_cast<long long>(time_ns),
-                 inliers[0],inliers[1],inliers[2],inliers[3]);
+    TraceMessage("CAM01_QUALITY t=%lld inliers=%d,%d,%d,%d", static_cast<long long>(time_ns), inliers[0], inliers[1],
+                 inliers[2], inliers[3]);
   }
   if (ok) result = std::move(right);
   return ok;
@@ -425,7 +478,7 @@ ImuFusionContext::ImuFusionContext(map::UnifiedMap& map, const camera::Rig& rig,
       optimizer_(10),
       init_bundler_(calib),
       sm_() {
-  if (const char* mode = std::getenv("CUVSLAM_JOINT_BACKEND"); mode && std::string_view(mode)=="window") {
+  if (const char* mode = std::getenv("CUVSLAM_JOINT_BACKEND"); mode && std::string_view(mode) == "window") {
     window_ = std::make_shared<sba_imu::WindowBackend>();
   }
   const char* option = std::getenv("CUVSLAM_JOINT_VI");
@@ -439,13 +492,16 @@ void ImuFusionContext::register_gravity_callback() {
 }
 
 void ImuFusionContext::reset() {
-  if (window_) { window_->reset(); }
+  if (window_) {
+    window_->reset();
+  }
   imu_storage_.clear();
   recovery_anchor.reset();
   last_recovery_anchor_ts_ns_ = -1;
   sm_.reset();
   joint_active_ = has_joint_prior_ = false;
-  guard_prediction_only_ = guard_exhausted_ = guard_internal_prediction_ = false; guard_rejected_s_ = 0;
+  guard_prediction_only_ = guard_exhausted_ = guard_internal_prediction_ = false;
+  guard_rejected_s_ = 0;
   is_first_run_ = true;
   integrated_ = false;
   prev_pose_ts_ns_ = prepared_previous_ts_ns_ = -1;
@@ -475,7 +531,7 @@ void ImuFusionContext::add_measurement(const imu::ImuMeasurement& m) {
 }
 
 ImuFusionContext::FramePrep ImuFusionContext::prepare_frame(int64_t time_ns) {
-  prepared_previous_ts_ns_=prev_pose_ts_ns_;
+  prepared_previous_ts_ns_ = prev_pose_ts_ns_;
   guard_prediction_only_ = guard_exhausted_ = guard_internal_prediction_ = false;
   if (is_first_run_) {
     Vector15T diag = Vector15T::Zero();
@@ -533,34 +589,48 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
     const bool guarded = rig_.num_cameras >= 2;
     sba_imu::Pose prediction;
     bool prediction_valid = false, conservative_update = false;
-    has_joint_prior_ = interval_healthy && solve_joint(calib_, rig_, landmarks, observations, *maybe_gravity,
-                                                       settings, prev_pose_, has_joint_prior_, curr_pose_, time_ns,
-                                                       guarded, prediction, prediction_valid, conservative_update);
-    if(guarded&&has_joint_prior_&&conservative_update){
+    has_joint_prior_ = interval_healthy && solve_joint(calib_, rig_, landmarks, observations, *maybe_gravity, settings,
+                                                       prev_pose_, has_joint_prior_, curr_pose_, time_ns, guarded,
+                                                       prediction, prediction_valid, conservative_update);
+    if (guarded && has_joint_prior_ && conservative_update) {
       // A validated visual-inertial update is not a prediction-only failure.
       // Preserve tracking/temporal anchoring, but do not triangulate or write a
       // window/map until the full observation support test succeeds again.
-      guard_prediction_only_=true;
-      frontend_guard::prediction_budget(guard_rejected_s_,last_frame_preint_.dT_s,true);
-      if(window_)window_->discard_pending();
-      TraceMessage("FRONTEND_DEGRADED_VI t=%lld visual_valid=1 map_update=0",(long long)time_ns);
+      guard_prediction_only_ = true;
+      frontend_guard::prediction_budget(guard_rejected_s_, last_frame_preint_.dT_s, true);
+      if (window_) window_->discard_pending();
+      TraceMessage("FRONTEND_DEGRADED_VI t=%lld visual_valid=1 map_update=0", (long long)time_ns);
       return true;
     }
     if (guarded && !has_joint_prior_) {
-      const bool within_budget=frontend_guard::prediction_budget(guard_rejected_s_,last_frame_preint_.dT_s,false);
+      const bool within_budget = frontend_guard::prediction_budget(guard_rejected_s_, last_frame_preint_.dT_s, false);
       guard_prediction_only_ = interval_healthy && prediction_valid && within_budget && prev_pose_ts_ns_ >= 0;
       guard_exhausted_ = !guard_prediction_only_;
       guard_internal_prediction_ = interval_healthy && prediction_valid;
-      if (guard_internal_prediction_) { curr_pose_ = prediction; has_joint_prior_ = true; }
+      if (guard_internal_prediction_) {
+        curr_pose_ = prediction;
+        has_joint_prior_ = true;
+      }
       if (window_) window_->discard_pending();
       if (guard_prediction_only_) {
         curr_pose_ = prediction;
-        has_joint_prior_ = true; // propagated uncertainty, not an accepted visual posterior
-        TraceMessage("FRONTEND_PREDICTION t=%lld duration=%.9g map_update=0",(long long)time_ns,guard_rejected_s_);
+        has_joint_prior_ = true;  // propagated uncertainty, not an accepted visual posterior
+        TraceMessage("FRONTEND_PREDICTION t=%lld duration=%.9g map_update=0", (long long)time_ns, guard_rejected_s_);
       } else {
-        TraceMessage("FRONTEND_EXHAUSTED t=%lld duration=%.9g",(long long)time_ns,guard_rejected_s_);
+        TraceMessage("FRONTEND_EXHAUSTED t=%lld duration=%.9g", (long long)time_ns, guard_rejected_s_);
       }
-      return false; // FrameFailed: never promote prediction to a valid visual anchor
+      return false;  // FrameFailed: never promote prediction to a valid visual anchor
+    }
+    if (has_joint_prior_) {
+      const auto& p = prediction.w_from_imu.translation();
+      const auto& f = curr_pose_.w_from_imu.translation();
+      const auto& v = curr_pose_.velocity;
+      const auto& ba = curr_pose_.acc_bias;
+      TraceMessage(
+          "VIO_HEIGHT_FRONTEND t=%lld pp=%.9g,%.9g,%.9g fp=%.9g,%.9g,%.9g v=%.9g,%.9g,%.9g ba=%.9g,%.9g,%.9g "
+          "g=%.9g,%.9g,%.9g",
+          (long long)time_ns, p.x(), p.y(), p.z(), f.x(), f.y(), f.z(), v.x(), v.y(), v.z(), ba.x(), ba.y(), ba.z(),
+          maybe_gravity->x(), maybe_gravity->y(), maybe_gravity->z());
     }
     if (has_joint_prior_) guard_rejected_s_ = 0;
     const bool needs_independent_anchor =
@@ -570,28 +640,39 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
       // keyframe become the next window seed. No candidate is published and
       // no tentative window/map transaction is committed at this keyframe.
       window_->discard_pending();
-      TraceMessage("WINDOW_RECOVERY_DEFER t=%lld anchor=%lld",
-                   static_cast<long long>(time_ns), static_cast<long long>(last_recovery_anchor_ts_ns_));
+      TraceMessage("WINDOW_RECOVERY_DEFER t=%lld anchor=%lld", static_cast<long long>(time_ns),
+                   static_cast<long long>(last_recovery_anchor_ts_ns_));
     } else if (window_ && is_keyframe && has_joint_prior_) {
       const auto tracked = curr_pose_;
       auto candidate = tracked;
-      auto validator = [&](const sba_imu::Pose& value,const std::map<TrackId,Vector3T>& points) {
-        return !guarded || frontend_guard::validate(calib_,rig_,points,observations,prediction,value,
-            settings.min_observations,last_frame_preint_.dT_s,time_ns,"window",false,true);
+      auto validator = [&](const sba_imu::Pose& value, const std::map<TrackId, Vector3T>& points) {
+        return !guarded || frontend_guard::validate(calib_, rig_, points, observations, prediction, value,
+                                                    settings.min_observations, last_frame_preint_.dT_s, time_ns,
+                                                    "window", false, true);
       };
-      const auto window_started=std::chrono::steady_clock::now();
-      const bool window_ok=window_->solve({map_, calib_, rig_, imu_storage_, landmarks, observations, *maybe_gravity,
-                         settings, prev_pose_, tracked, prev_pose_ts_ns_, time_ns, validator}, candidate);
-      const double window_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-window_started).count();
-      TraceMessage("WINDOW_BENCH t=%lld ms=%.6f ok=%d",(long long)time_ns,window_ms,int(window_ok));
+      const auto window_started = std::chrono::steady_clock::now();
+      const bool window_ok = window_->solve({map_, calib_, rig_, imu_storage_, landmarks, observations, *maybe_gravity,
+                                             settings, prev_pose_, tracked, prev_pose_ts_ns_, time_ns, validator},
+                                            candidate);
+      const double window_ms =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - window_started).count();
+      TraceMessage("WINDOW_BENCH t=%lld ms=%.6f ok=%d", (long long)time_ns, window_ms, int(window_ok));
+      const auto& f = tracked.w_from_imu.translation();
+      const auto& c = candidate.w_from_imu.translation();
+      TraceMessage("VIO_HEIGHT_WINDOW t=%lld accepted=%d fp=%.9g,%.9g,%.9g cp=%.9g,%.9g,%.9g dh=%.9g",
+                   (long long)time_ns, int(window_ok), f.x(), f.y(), f.z(), c.x(), c.y(), c.z(),
+                   double((-maybe_gravity->normalized()).dot(c - f)));
       if (window_ok) {
         curr_pose_ = std::move(candidate);
       } else {
-        TraceMessage("WINDOW_TRACKING_ONLY t=%lld frontend_validated=%d",static_cast<long long>(time_ns),int(guarded));
+        TraceMessage("WINDOW_TRACKING_ONLY t=%lld frontend_validated=%d", static_cast<long long>(time_ns),
+                     int(guarded));
       }
     }
     if (has_joint_prior_) return true;
-    if (window_) { window_->reset(); }
+    if (window_) {
+      window_->reset();
+    }
     TraceMessage("JOINT_VISUAL_FALLBACK t=%lld", static_cast<long long>(time_ns));
     return solve_visual(landmarks, observations, depth_infos, planes, depth_points, time_ns);
   }
@@ -618,7 +699,9 @@ bool ImuFusionContext::solve_visual(const std::unordered_map<TrackId, Vector3T>&
                                     const std::vector<camera::Observation>& observations,
                                     const pnp::RGBDInfos& depth_infos, const std::vector<map::Plane>& planes,
                                     const std::vector<Vector3T>& depth_points, int64_t time_ns) {
-  if (window_) { window_->reset(); }
+  if (window_) {
+    window_->reset();
+  }
   has_joint_prior_ = false;
   TRACE_EVENT ev = profiler_domain_.trace_event("solve_visual");
   const Isometry3T imu_from_rig = calib_.rig_from_imu().inverse();
@@ -649,7 +732,8 @@ bool ImuFusionContext::solve_visual(const std::unordered_map<TrackId, Vector3T>&
 
 ImuFusionContext::FrameResult ImuFusionContext::finalize_frame(bool pnp_result, bool no_drops, int64_t time_ns,
                                                                sof::FrameState fs,
-                                                               const StateMachineSettings& sm_settings, bool metric_bootstrap) {
+                                                               const StateMachineSettings& sm_settings,
+                                                               bool metric_bootstrap) {
   metric_bootstrap_ = metric_bootstrap;
   prev_pose_ts_ns_ = time_ns;
 
@@ -715,17 +799,18 @@ ImuFusionContext::FrameResult ImuFusionContext::finalize_frame(bool pnp_result, 
   // Diagnostic only: no correction or endpoint constraint is introduced.
   // Record the state actually carried into the next frame, not a rejected trial.
   if (joint_active_) {
-    const auto g=map_.get_gravity();
-    const auto& p=prev_pose_.w_from_imu.translation();
-    const auto& v=prev_pose_.velocity;
-    const auto& bg=prev_pose_.gyro_bias;
-    const auto& ba=prev_pose_.acc_bias;
+    const auto g = map_.get_gravity();
+    const auto& p = prev_pose_.w_from_imu.translation();
+    const auto& v = prev_pose_.velocity;
+    const auto& bg = prev_pose_.gyro_bias;
+    const auto& ba = prev_pose_.acc_bias;
     if (g) {
-      const Vector3T up=-g->normalized();
-      TraceMessage("VIO_STATE_AUDIT t=%lld valid=%d p=%.9g,%.9g,%.9g v=%.9g,%.9g,%.9g "
-                   "bg=%.9g,%.9g,%.9g ba=%.9g,%.9g,%.9g g=%.9g,%.9g,%.9g vz=%.9g",
-                   (long long)time_ns,int(result.valid_pose),p.x(),p.y(),p.z(),v.x(),v.y(),v.z(),
-                   bg.x(),bg.y(),bg.z(),ba.x(),ba.y(),ba.z(),g->x(),g->y(),g->z(),v.dot(up));
+      const Vector3T up = -g->normalized();
+      TraceMessage(
+          "VIO_STATE_AUDIT t=%lld valid=%d p=%.9g,%.9g,%.9g v=%.9g,%.9g,%.9g "
+          "bg=%.9g,%.9g,%.9g ba=%.9g,%.9g,%.9g g=%.9g,%.9g,%.9g vz=%.9g",
+          (long long)time_ns, int(result.valid_pose), p.x(), p.y(), p.z(), v.x(), v.y(), v.z(), bg.x(), bg.y(), bg.z(),
+          ba.x(), ba.y(), ba.z(), g->x(), g->y(), g->z(), v.dot(up));
     }
   }
 
@@ -757,27 +842,32 @@ map::State ImuFusionContext::build_keyframe_state(const Isometry3T& rig_from_wor
 bool ImuFusionContext::on_keyframe_committed(bool lost) {
   if (window_ && !lost && has_joint_prior_ && !window_->commit(map_, calib_, prev_pose_ts_ns_)) {
     // Fail closed: a pose whose map transaction failed is not a valid output.
-    window_->reset();has_joint_prior_=false;guard_exhausted_=true;
-    TraceMessage("FRONTEND_COMMIT_FAILED t=%lld publish=0",(long long)prev_pose_ts_ns_);
+    window_->reset();
+    has_joint_prior_ = false;
+    guard_exhausted_ = true;
+    TraceMessage("FRONTEND_COMMIT_FAILED t=%lld publish=0", (long long)prev_pose_ts_ns_);
     return false;
   }
-  if(joint_active_ && !lost) {
-    const auto recent=map_.get_recent_submap(1);
-    if(recent.consecutive_keyframes.empty() || recent.consecutive_keyframes.back().keyframe->time_ns()!=prev_pose_ts_ns_) {
-      TraceMessage("FRONTEND_COMMIT_FAILED t=%lld reason=missing_current publish=0",(long long)prev_pose_ts_ns_);
+  if (joint_active_ && !lost) {
+    const auto recent = map_.get_recent_submap(1);
+    if (recent.consecutive_keyframes.empty() ||
+        recent.consecutive_keyframes.back().keyframe->time_ns() != prev_pose_ts_ns_) {
+      TraceMessage("FRONTEND_COMMIT_FAILED t=%lld reason=missing_current publish=0", (long long)prev_pose_ts_ns_);
       return false;
     }
-    const auto state=recent.consecutive_keyframes.back().keyframe->get_state();
-    const auto imu_pose=state.rig_from_w.inverse()*calib_.rig_from_imu();
-    const double dp=(imu_pose.translation()-prev_pose_.w_from_imu.translation()).norm();
-    const double dv=(state.velocity-prev_pose_.velocity).norm();
-    const double dbg=(state.gyro_bias-prev_pose_.gyro_bias).norm(),dba=(state.acc_bias-prev_pose_.acc_bias).norm();
-    if(dp>1e-4 || dv>1e-4 || dbg>1e-4 || dba>1e-4 ||
-       !imu_pose.matrix().isApprox(prev_pose_.w_from_imu.matrix(),1e-4f)) {
-      TraceMessage("FRONTEND_COMMIT_FAILED t=%lld reason=state_mismatch publish=0",(long long)prev_pose_ts_ns_);
+    const auto state = recent.consecutive_keyframes.back().keyframe->get_state();
+    const auto imu_pose = state.rig_from_w.inverse() * calib_.rig_from_imu();
+    const double dp = (imu_pose.translation() - prev_pose_.w_from_imu.translation()).norm();
+    const double dv = (state.velocity - prev_pose_.velocity).norm();
+    const double dbg = (state.gyro_bias - prev_pose_.gyro_bias).norm(),
+                 dba = (state.acc_bias - prev_pose_.acc_bias).norm();
+    if (dp > 1e-4 || dv > 1e-4 || dbg > 1e-4 || dba > 1e-4 ||
+        !imu_pose.matrix().isApprox(prev_pose_.w_from_imu.matrix(), 1e-4f)) {
+      TraceMessage("FRONTEND_COMMIT_FAILED t=%lld reason=state_mismatch publish=0", (long long)prev_pose_ts_ns_);
       return false;
     }
-    TraceMessage("VIO_COMMIT_CONSISTENT t=%lld dp=%.9g dv=%.9g dbg=%.9g dba=%.9g",(long long)prev_pose_ts_ns_,dp,dv,dbg,dba);
+    TraceMessage("VIO_COMMIT_CONSISTENT t=%lld dp=%.9g dv=%.9g dbg=%.9g dba=%.9g", (long long)prev_pose_ts_ns_, dp, dv,
+                 dbg, dba);
   }
   last_kf_ts_ns_ = prev_pose_ts_ns_;
   if (joint_active_) integ_kf_ = prev_pose_;
@@ -787,30 +877,27 @@ bool ImuFusionContext::on_keyframe_committed(bool lost) {
 }
 
 bool ImuFusionContext::validate_recovery_seed(const map::Map<TrackId, Vector3T>& points,
-                                               const std::vector<camera::Observation>& observations,
-                                               int required, int64_t time_ns) const {
-  return frontend_guard::validate(calib_, rig_, points, observations, prev_pose_, prev_pose_,
-                                   required, 1./30., time_ns, "stereo_seed", false, true);
+                                              const std::vector<camera::Observation>& observations, int required,
+                                              int64_t time_ns) const {
+  return frontend_guard::validate(calib_, rig_, points, observations, prev_pose_, prev_pose_, required, 1. / 30.,
+                                  time_ns, "stereo_seed", false, true);
 }
 
 void ImuFusionContext::commit_recovery_anchor(int64_t current_time_ns) {
   const auto& anchor = *recovery_anchor;
   const auto world_from_rig = anchor.pose.w_from_imu * calib_.rig_from_imu().inverse();
-  const map::State state{world_from_rig.inverse(), anchor.pose.velocity,
-                         anchor.pose.acc_bias, anchor.pose.gyro_bias};
-  map_.add_keyframe(anchor.time_ns, state, anchor.previous_keyframe_preint,
-                    anchor.observations, anchor.landmarks);
+  const map::State state{world_from_rig.inverse(), anchor.pose.velocity, anchor.pose.acc_bias, anchor.pose.gyro_bias};
+  map_.add_keyframe(anchor.time_ns, state, anchor.previous_keyframe_preint, anchor.observations, anchor.landmarks);
   last_kf_ts_ns_ = anchor.time_ns;
   last_recovery_anchor_ts_ns_ = anchor.time_ns;
   integ_kf_ = anchor.pose;
-  last_kf_preint_ = sba_imu::IMUPreintegration(calib_, imu_storage_, anchor.pose.gyro_bias,
-                                              anchor.pose.acc_bias, anchor.time_ns, current_time_ns);
+  last_kf_preint_ = sba_imu::IMUPreintegration(calib_, imu_storage_, anchor.pose.gyro_bias, anchor.pose.acc_bias,
+                                               anchor.time_ns, current_time_ns);
   if (window_) {
     window_->reset();
   }
-  TraceMessage("VIO_STEREO_RECOVERED t=%lld anchor=%lld landmarks=%zu",
-               static_cast<long long>(current_time_ns), static_cast<long long>(anchor.time_ns),
-               anchor.landmarks.size());
+  TraceMessage("VIO_STEREO_RECOVERED t=%lld anchor=%lld landmarks=%zu", static_cast<long long>(current_time_ns),
+               static_cast<long long>(anchor.time_ns), anchor.landmarks.size());
   recovery_anchor.reset();
 }
 
@@ -819,9 +906,9 @@ std::optional<Matrix3T> ImuFusionContext::joint_position_covariance() const {
   Eigen::MatrixXd info = prev_pose_.info.cast<double>();
   Eigen::LDLT<Eigen::MatrixXd> ldlt(info);
   if (ldlt.info() != Eigen::Success || ldlt.vectorD().minCoeff() <= 0.) return std::nullopt;
-  Eigen::MatrixXd selector = Eigen::MatrixXd::Zero(15,3);
-  selector.block<3,3>(3,0).setIdentity();
-  Eigen::Matrix3d cov = ldlt.solve(selector).block<3,3>(3,0);
+  Eigen::MatrixXd selector = Eigen::MatrixXd::Zero(15, 3);
+  selector.block<3, 3>(3, 0).setIdentity();
+  Eigen::Matrix3d cov = ldlt.solve(selector).block<3, 3>(3, 0);
   const Eigen::Matrix3d rot = prev_pose_.w_from_imu.linear().cast<double>();
   cov = rot * cov * rot.transpose();
   if (!cov.allFinite()) return std::nullopt;
@@ -829,7 +916,9 @@ std::optional<Matrix3T> ImuFusionContext::joint_position_covariance() const {
 }
 
 bool ImuFusionContext::read_committed_state(int64_t time_ns, Isometry3T& world_from_rig, Matrix6T& info) {
-  if (window_active()) { return false; }
+  if (window_active()) {
+    return false;
+  }
   if (!joint_active_ || prev_pose_ts_ns_ != time_ns) return false;
   const auto recent = map_.get_recent_submap(1);
   if (recent.consecutive_keyframes.empty()) return false;
@@ -838,8 +927,9 @@ bool ImuFusionContext::read_committed_state(int64_t time_ns, Isometry3T& world_f
   const auto state = key->get_state();
   const Isometry3T corrected = state.rig_from_w.inverse();
   const Isometry3T corrected_imu = corrected * calib_.rig_from_imu();
-  if (!corrected.matrix().allFinite() || !state.velocity.allFinite() ||
-      !state.gyro_bias.allFinite() || !state.acc_bias.allFinite()) return false;
+  if (!corrected.matrix().allFinite() || !state.velocity.allFinite() || !state.gyro_bias.allFinite() ||
+      !state.acc_bias.allFinite())
+    return false;
   const float dp = (world_from_rig.translation() - corrected.translation()).norm();
   const bool changed = !prev_pose_.w_from_imu.matrix().isApprox(corrected_imu.matrix(), 1e-6f) ||
                        !prev_pose_.velocity.isApprox(state.velocity, 1e-6f) ||
@@ -871,7 +961,8 @@ std::optional<Vector3T> ImuFusionContext::get_gravity() const {
 bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
   TRACE_EVENT ev = profiler_domain_.trace_event("gravity_estimation_callback");
   auto recent_map = map_.get_recent_submap(map_.capacity());
-  TraceMessage("VIO_INIT_ATTEMPT kfs=%zu required=%zu metric=%d", recent_map.consecutive_keyframes.size(), num_kfs, static_cast<int>(metric_bootstrap_));
+  TraceMessage("VIO_INIT_ATTEMPT kfs=%zu required=%zu metric=%d", recent_map.consecutive_keyframes.size(), num_kfs,
+               static_cast<int>(metric_bootstrap_));
 
   if (recent_map.consecutive_keyframes.size() < num_kfs) {
     return false;
@@ -887,11 +978,11 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
   }
 
   // Reject missing or misassigned keyframe intervals before estimating gravity.
-  for (size_t i=0;i+1<gravity_cache.size();++i) {
-    const auto left=recent_map.consecutive_keyframes[i].keyframe->time_ns();
-    const auto right=recent_map.consecutive_keyframes[i+1].keyframe->time_ns();
-    if (!ValidInitInterval(left,right,gravity_cache[i].preintegration.dT_s)) {
-      TraceMessage("VIO_INIT_REJECT stage=interval index=%zu",i);
+  for (size_t i = 0; i + 1 < gravity_cache.size(); ++i) {
+    const auto left = recent_map.consecutive_keyframes[i].keyframe->time_ns();
+    const auto right = recent_map.consecutive_keyframes[i + 1].keyframe->time_ns();
+    if (!ValidInitInterval(left, right, gravity_cache[i].preintegration.dT_s)) {
+      TraceMessage("VIO_INIT_REJECT stage=interval index=%zu", i);
       return false;
     }
   }
@@ -919,7 +1010,7 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
     return false;
   }
 
-  if (!ValidInitCandidate(gravity_cache,Rgravity)) {
+  if (!ValidInitCandidate(gravity_cache, Rgravity)) {
     TraceMessage("VIO_INIT_REJECT stage=candidate_finite_rotation");
     return false;
   }
@@ -947,33 +1038,38 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
 
   // Bias estimates share sensor coordinates, but velocities belong to distinct
   // times. Never copy the last keyframe velocity into every live frame.
-  const auto& anchor=gravity_cache.back();
-  const int64_t anchor_ns=recent_map.consecutive_keyframes.back().keyframe->time_ns();
-  auto synchronize=[&](sba_imu::Pose& pose,int64_t stamp) {
-    pose.gyro_bias=anchor.gyro_bias;pose.acc_bias=anchor.acc_bias;
-    if(stamp==anchor_ns) {pose.velocity=anchor.velocity;}
-    else if(stamp>anchor_ns) {
-      sba_imu::IMUPreintegration pi(calib_,imu_storage_,anchor.gyro_bias,anchor.acc_bias,anchor_ns,stamp);
+  const auto& anchor = gravity_cache.back();
+  const int64_t anchor_ns = recent_map.consecutive_keyframes.back().keyframe->time_ns();
+  auto synchronize = [&](sba_imu::Pose& pose, int64_t stamp) {
+    pose.gyro_bias = anchor.gyro_bias;
+    pose.acc_bias = anchor.acc_bias;
+    if (stamp == anchor_ns) {
+      pose.velocity = anchor.velocity;
+    } else if (stamp > anchor_ns) {
+      sba_imu::IMUPreintegration pi(calib_, imu_storage_, anchor.gyro_bias, anchor.acc_bias, anchor_ns, stamp);
       Vector3T velocity;
-      if(InitVelocityAt(anchor,pi,anchor_ns,stamp,gravity_for_sba,velocity)) {
-        pose.velocity=velocity;
+      if (InitVelocityAt(anchor, pi, anchor_ns, stamp, gravity_for_sba, velocity)) {
+        pose.velocity = velocity;
       }
     }
-    pose.preintegration.SetNewBias(anchor.gyro_bias,anchor.acc_bias);
+    pose.preintegration.SetNewBias(anchor.gyro_bias, anchor.acc_bias);
     pose.preintegration.Reintegrate(calib_);
     seed_joint_prior(pose);
   };
-  synchronize(curr_pose_,prev_pose_ts_ns_);
-  synchronize(prev_pose_,prepared_previous_ts_ns_);
-  synchronize(last_valid_pose_,last_valid_ts_ns_);
-  synchronize(integ_kf_,last_kf_ts_ns_);
+  synchronize(curr_pose_, prev_pose_ts_ns_);
+  synchronize(prev_pose_, prepared_previous_ts_ns_);
+  synchronize(last_valid_pose_, last_valid_ts_ns_);
+  synchronize(integ_kf_, last_kf_ts_ns_);
   // The old Hessian/linearization is incompatible with the new bias/gravity.
-  has_joint_prior_=false;
-  if(window_) {window_->reset();}
-  TraceMessage("VIO_INIT_STATE_SYNC current=%lld previous=%lld anchor=%lld",(long long)prev_pose_ts_ns_,
-               (long long)prepared_previous_ts_ns_,(long long)anchor_ns);
+  has_joint_prior_ = false;
+  if (window_) {
+    window_->reset();
+  }
+  TraceMessage("VIO_INIT_STATE_SYNC current=%lld previous=%lld anchor=%lld", (long long)prev_pose_ts_ns_,
+               (long long)prepared_previous_ts_ns_, (long long)anchor_ns);
 
-  TraceMessage("VIO_INIT_SUCCESS gravity_norm=%.7f metric=%d", gravity_for_sba.norm(), static_cast<int>(metric_bootstrap_));
+  TraceMessage("VIO_INIT_SUCCESS gravity_norm=%.7f metric=%d", gravity_for_sba.norm(),
+               static_cast<int>(metric_bootstrap_));
   map_.set_gravity(gravity_for_sba);
   return true;
 }

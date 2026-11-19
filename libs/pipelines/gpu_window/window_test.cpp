@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+ *
+ * NVIDIA software released under the NVIDIA Community License is intended to be used to enable
+ * the further development of AI and robotics technologies. Such software has been designed, tested,
+ * and optimized for use with NVIDIA hardware, and this License grants permission to use the software
+ * solely with such hardware.
+ * Subject to the terms of this License, NVIDIA confirms that you are free to commercially use,
+ * modify, and distribute the software with NVIDIA hardware. NVIDIA does not claim ownership of any
+ * outputs generated using the software or derivative works thereof. Any code contributions that you
+ * share with NVIDIA are licensed to NVIDIA as feedback under this License and may be incorporated
+ * in future releases without notice or attribution.
+ * By using, reproducing, modifying, distributing, performing, or displaying any portion or element
+ * of the software or derivative works thereof, you agree to be bound by this License.
+ */
+
 #include <cassert>
 #include <iostream>
 #include "window_fp64.h"
@@ -370,4 +386,64 @@ int main() {
   compress_prior(projected, rr, root, offset);
   assert((root.transpose() * root - safe).norm() / safe.norm() < 1e-10);
   std::cout << "square-root projection/compression and ill-conditioned marginalization passed\n";
+  {
+    Problem q = p;
+    for (int side = 0; side < q.count; ++side) {
+      Eigen::Matrix3d R = Eigen::AngleAxisd(.4 + .1 * side, Eigen::Vector3d(1, -2, 3).normalized()).toRotationMatrix();
+      for (int i = 0; i < 3; ++i) {
+        q.nodes[side].p[i] += (i == 2 ? 1.5 : 2.);
+        for (int j = 0; j < 3; ++j) q.nodes[side].R[3 * i + j] = R(i, j);
+      }
+    }
+    std::vector<double> x(15 * q.count + 3 * q.points.size());
+    for (size_t i = 0; i < x.size(); ++i) x[i] = .04 * (int(i % 5) - 2);
+    auto ev = fp64::EvaluateHost(q, x, true);
+    double worst = 0;
+    for (int col = 0; col < 15 * q.count; ++col) {
+      auto a = x, b = x;
+      a[col] += 1e-6;
+      b[col] -= 1e-6;
+      auto ea = fp64::EvaluateHost(q, a, false), eb = fp64::EvaluateHost(q, b, false);
+      for (size_t row = 0; row < ev.prior.size(); ++row) {
+        double num = (ea.prior[row] - eb.prior[row]) / 2e-6;
+        double ad = ev.prior_j[row * 15 * q.count + col];
+        worst = std::max(worst, std::abs(num - ad) / std::max(1., std::abs(ad)));
+      }
+      for (size_t k = 0; k < q.visuals.size(); ++k)
+        if (q.visuals[k].node == col / 15) {
+          for (int row = 0; row < 2; ++row) {
+            double num = (ea.visual[2 * k + row] - eb.visual[2 * k + row]) / 2e-6;
+            double ad = ev.visual_j[36 * k + row * 18 + col % 15];
+            worst = std::max(worst, std::abs(num - ad) / std::max(1., std::abs(ad)));
+          }
+        }
+    }
+    assert(worst < 1e-5);
+    std::cout << "Nonzero window visual/prior finite-difference relative error=" << worst << "\n";
+  }
+  // Check the real 3/4-state sizes too: prior matrices keep a Dim stride,
+  // while the active normal equations and point cross blocks use n=15*count.
+  for (int count : {3, 4, 6}) {
+    Problem q = p;
+    q.count = count;
+    q.offset[6] = .02;
+    q.edges.erase(std::remove_if(q.edges.begin(), q.edges.end(),
+                                 [&](const Edge& e) { return e.left >= count || e.right >= count; }),
+                  q.edges.end());
+    q.visuals.erase(
+        std::remove_if(q.visuals.begin(), q.visuals.end(), [&](const Visual& v) { return v.node >= count; }),
+        q.visuals.end());
+    std::vector<double> x(15 * count + 3 * q.points.size());
+    for (size_t j = 0; j < x.size(); ++j) x[j] = .001 * (int(j % 5) - 2);
+    auto cpu = fp64::MakeCpu(q), gpu = fp64::MakeGpu(q);
+    double c0 = cpu->Evaluate(x, true), c1 = gpu->Evaluate(x, true);
+    auto a = cpu->Solve(1e-3), b = gpu->Solve(1e-3);
+    assert(a.valid && b.valid);
+    double max_delta = 0;
+    for (size_t j = 0; j < a.dx.size(); ++j) max_delta = std::max(max_delta, std::abs(a.dx[j] - b.dx[j]));
+    assert(std::abs(c0 - c1) < 1e-8 * std::max(1., std::abs(c0)));
+    assert(max_delta < 1e-6);
+    std::cout << "FP64_COUNT_AUDIT count=" << count << " cost_delta=" << std::abs(c0 - c1)
+              << " step_delta=" << max_delta << "\n";
+  }
 }

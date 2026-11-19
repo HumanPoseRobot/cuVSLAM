@@ -1,0 +1,83 @@
+{
+  "gpu_pnp_actual_cuda_plus_jacobian_max_absolute_error": 0.00028,
+  "gpu_pnp_cuda_jacobian_tolerance": 0.003,
+  "window_nonzero_visual_prior_fp64_fd_max_relative_error": 1.8617e-08,
+  "fp64_cpu_gpu_first_step_max_absolute_difference": {
+    "3": 1.28174e-15,
+    "4": 4.88888e-15,
+    "6": 5.40193e-15
+  },
+  "old_failures_reproduced": [
+    "GPU PnP all-behind-camera false success",
+    "CPU PnP unmatched map false success",
+    "late window rejection modifies caller output",
+    "LM NaN/Inf gain handling"
+  ],
+  "old_invalid_pose_svd_test_not_executed": "Avoid sending Inf to old unchecked SVD; new early-reject test passed.",
+  "lm_error_logger_unit_control_events": 3,
+  "all_six_actual_lm_nonfinite_gain_reject_events": 0,
+  "all_six_actual_pnp_reject_events": 0,
+  "actual_late_window_rejections": {
+    "203017": 0,
+    "201148": 0,
+    "170302": 0,
+    "room2": 63,
+    "room5": 239,
+    "room6": 13
+  },
+  "existing_common_test_failure": {
+    "test": "RotationUtilsTest.CalculateRotationFromSVD_WithScaling",
+    "seed": 37027,
+    "determinant": 1.0000011920928955,
+    "absolute_error": 1.1920928955078125e-06,
+    "assertion_tolerance": 1e-06,
+    "v135_and_fixed_reproduce_same_failure": true
+  },
+  "room5_height_diagnostics": {
+    "frontend_rows": 2519,
+    "window_rows": 485,
+    "accepted_windows": 239,
+    "window_correction_sum_m": 0.013993455359502999,
+    "largest_window_vertical_correction_m": 0.0128868688,
+    "world_gravity_max_change_m_s2": 0.0,
+    "first_sustained_errors": {
+      "0.02": {
+        "frame": 201,
+        "time_s": 10.050286281,
+        "published_error_m": -0.02269011639411478,
+        "before_gravity_initialization": true
+      },
+      "0.05": {
+        "frame": 768,
+        "time_s": 38.40139593,
+        "published_error_m": -0.05012824251885817,
+        "prediction_error_m": -0.04937199634562195,
+        "frontend_error_m": -0.050129379478326075,
+        "acc_bias_m_s2": [
+          -0.0554919317,
+          -0.0169873293,
+          -0.0285024066
+        ],
+        "frontend_velocity_gt_z_mps": 0.08865643208264579,
+        "gravity_tilt_first_orientation_deg": 0.3040161797042474,
+        "before_gravity_initialization": false
+      },
+      "0.1": {
+        "frame": 1570,
+        "time_s": 78.502314684,
+        "published_error_m": -0.10365812577615718,
+        "prediction_error_m": -0.10248880933417925,
+        "frontend_error_m": -0.10365102823016403,
+        "acc_bias_m_s2": [
+          0.104290076,
+          -0.0166839194,
+          -0.0083000334
+        ],
+        "frontend_velocity_gt_z_mps": -0.4802914229867959,
+        "gravity_tilt_first_orientation_deg": 0.3040161797042474,
+        "before_gravity_initialization": false
+      }
+    },
+    "gravity_tilt_first_orientation_deg": 0.3040161797042474
+  }
+}

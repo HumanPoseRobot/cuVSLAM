@@ -1,5 +1,20 @@
+/*
+ * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+ *
+ * NVIDIA software released under the NVIDIA Community License is intended to be used to enable
+ * the further development of AI and robotics technologies. Such software has been designed, tested,
+ * and optimized for use with NVIDIA hardware, and this License grants permission to use the software
+ * solely with such hardware.
+ * Subject to the terms of this License, NVIDIA confirms that you are free to commercially use,
+ * modify, and distribute the software with NVIDIA hardware. NVIDIA does not claim ownership of any
+ * outputs generated using the software or derivative works thereof. Any code contributions that you
+ * share with NVIDIA are licensed to NVIDIA as feedback under this License and may be incorporated
+ * in future releases without notice or attribution.
+ * By using, reproducing, modifying, distributing, performing, or displaying any portion or element
+ * of the software or derivative works thereof, you agree to be bound by this License.
+ */
+
 #include "window_backend.h"
-#include "window_commit_validation.h"
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -7,6 +22,7 @@
 #include <set>
 #include <string>
 #include "common/log.h"
+#include "window_commit_validation.h"
 #include "window_fp64.h"
 #include "window_linear.h"
 #include "window_math.h"
@@ -705,8 +721,9 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
     return false;
   }
   g.nodes.back().pose.info = info.cast<float>();
-  result = g.nodes.back().pose;
-  if (!result.info.allFinite() || !result.velocity.allFinite() || !result.w_from_imu.matrix().allFinite()) {
+  const Pose accepted_result = g.nodes.back().pose;
+  if (!accepted_result.info.allFinite() || !accepted_result.velocity.allFinite() ||
+      !accepted_result.w_from_imu.matrix().allFinite()) {
     return false;
   }
   const bool enforce_map = true;  // This safety variant never bypasses map acceptance.
@@ -720,7 +737,7 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
   for (const auto& point : input.landmarks) {
     visible_points.emplace(point.first, point.second);
   }
-  if (input.accept_candidate && !input.accept_candidate(result, enforce_map ? visible_points : g.points)) {
+  if (input.accept_candidate && !input.accept_candidate(accepted_result, enforce_map ? visible_points : g.points)) {
     return false;
   }
   // A rejected map update also rejects its local solution and derived prior.
@@ -737,10 +754,10 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
   // Capture the authoritative map version used by this solve. A commit may
   // follow keyframe insertion, but must not overwrite an intervening correction.
   d.pending_expected.clear();
-  for(const auto& k:map.get_recent_submap(20).consecutive_keyframes) {
-    const auto kt=k.keyframe->time_ns();
-    if(std::any_of(publish_nodes.begin(),publish_nodes.end(),[&](const Node& n){return n.t==kt;})) {
-      d.pending_expected.emplace(kt,k.keyframe->get_state());
+  for (const auto& k : map.get_recent_submap(20).consecutive_keyframes) {
+    const auto kt = k.keyframe->time_ns();
+    if (std::any_of(publish_nodes.begin(), publish_nodes.end(), [&](const Node& n) { return n.t == kt; })) {
+      d.pending_expected.emplace(kt, k.keyframe->get_state());
     }
   }
   d.pending_map_write = true;
@@ -748,6 +765,9 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
   d.pending_points = std::move(publish_points);
   d.pending = std::move(g);
   d.have_pending = true;
+  // Only publish after map support, the caller guard and retained-prior work
+  // all succeed. Returning false never modifies the caller's pose/information.
+  result = accepted_result;
   TraceMessage("WINDOW_SOLVE t=%lld states=%zu points=%zu obs=%zu iterations=%d before=%.9g after=%.9g", (long long)t,
                d.pending.nodes.size(), ids.size(), final.visuals.size(), solved.iterations, solved.before, after);
   return true;
@@ -764,36 +784,47 @@ bool WindowBackend::commit(map::UnifiedMap& map, const imu::ImuCalibration& cal,
   }
   // Validate every destination before the first mutation. The caller must not
   // publish a window candidate if this transaction fails.
-  const auto destinations=map.get_recent_submap(20);
-  std::map<int64_t,map::State> states;
-  for(const auto& k:destinations.consecutive_keyframes) {states.emplace(k.keyframe->time_ns(),k.keyframe->get_state());}
-  for(const auto& n:d.pending_publish_nodes) {
-    auto it=states.find(n.t);
-    if(it==states.end()) {
-      TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=commit_missing_keyframe",(long long)t);
-      discard_pending();return false;
+  const auto destinations = map.get_recent_submap(20);
+  std::map<int64_t, map::State> states;
+  for (const auto& k : destinations.consecutive_keyframes) {
+    states.emplace(k.keyframe->time_ns(), k.keyframe->get_state());
+  }
+  for (const auto& n : d.pending_publish_nodes) {
+    auto it = states.find(n.t);
+    if (it == states.end()) {
+      TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=commit_missing_keyframe", (long long)t);
+      discard_pending();
+      return false;
     }
-    auto expected=d.pending_expected.find(n.t);
-    if(expected!=d.pending_expected.end()) {
-      const auto& a=it->second;const auto& b=expected->second;
-      if(!SameCommitState(a,b)) {
-        TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=commit_map_changed",(long long)t);
-        discard_pending();return false;
+    auto expected = d.pending_expected.find(n.t);
+    if (expected != d.pending_expected.end()) {
+      const auto& a = it->second;
+      const auto& b = expected->second;
+      if (!SameCommitState(a, b)) {
+        TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=commit_map_changed", (long long)t);
+        discard_pending();
+        return false;
       }
     }
   }
-  std::map<int64_t,IMUPreintegration> refreshed;
-  for(const auto& k:destinations.consecutive_keyframes) {
-    if(!k.preintegration) {continue;}
-    for(const auto& n:d.pending_publish_nodes) {
-      if(k.keyframe->time_ns()!=n.t) {continue;}
-      auto pi=*k.preintegration;
-      pi.SetNewBias(n.pose.gyro_bias,n.pose.acc_bias);pi.Reintegrate(cal);
-      if(!pi.dR.allFinite() || !pi.dV.allFinite() || !pi.dP.allFinite() || !std::isfinite(pi.dT_s)) {
-        TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=commit_preintegration",(long long)t);
-        discard_pending();return false;
+  std::map<int64_t, IMUPreintegration> refreshed;
+  for (const auto& k : destinations.consecutive_keyframes) {
+    if (!k.preintegration) {
+      continue;
+    }
+    for (const auto& n : d.pending_publish_nodes) {
+      if (k.keyframe->time_ns() != n.t) {
+        continue;
       }
-      refreshed.emplace(n.t,std::move(pi));
+      auto pi = *k.preintegration;
+      pi.SetNewBias(n.pose.gyro_bias, n.pose.acc_bias);
+      pi.Reintegrate(cal);
+      if (!pi.dR.allFinite() || !pi.dV.allFinite() || !pi.dP.allFinite() || !std::isfinite(pi.dT_s)) {
+        TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=commit_preintegration", (long long)t);
+        discard_pending();
+        return false;
+      }
+      refreshed.emplace(n.t, std::move(pi));
     }
   }
   Graph g = std::move(d.pending);
@@ -806,9 +837,11 @@ bool WindowBackend::commit(map::UnifiedMap& map, const imu::ImuCalibration& cal,
     for (auto& k : sub.consecutive_keyframes) {
       for (auto& n : publish_nodes) {
         if (k.keyframe->time_ns() == n.t) {
-          if(k.preintegration) {
-            auto pi=refreshed.find(n.t);
-            if(pi!=refreshed.end()) {*k.preintegration=pi->second;}
+          if (k.preintegration) {
+            auto pi = refreshed.find(n.t);
+            if (pi != refreshed.end()) {
+              *k.preintegration = pi->second;
+            }
           }
           k.keyframe->set_state(map::State{(n.pose.w_from_imu * cal.rig_from_imu().inverse()).inverse(),
                                            n.pose.velocity, n.pose.acc_bias, n.pose.gyro_bias});

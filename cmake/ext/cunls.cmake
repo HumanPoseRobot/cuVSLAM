@@ -60,7 +60,7 @@ FetchContent_MakeAvailable(cunls)
 find_program(CUNLS_PATCH_EXECUTABLE NAMES patch REQUIRED)
 # The second patch reproduces the tested CUDA-12 header compatibility and
 # prevents shared reduction scratch storage from being overwritten by another warp.
-foreach(_cunls_patch_name IN ITEMS cunls_fixed_order.patch cunls_runtime_compat.patch)
+foreach(_cunls_patch_name IN ITEMS cunls_fixed_order.patch cunls_runtime_compat.patch cunls_lm_quality.patch)
     set(_cunls_patch "${CMAKE_CURRENT_LIST_DIR}/${_cunls_patch_name}")
     execute_process(COMMAND "${CUNLS_PATCH_EXECUTABLE}" --dry-run --batch --forward -R -p1
                             -i "${_cunls_patch}"

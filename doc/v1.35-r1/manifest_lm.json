@@ -1,0 +1,16 @@
+{
+  "base_commit": "9f44802be47748b53dda32ef37665fcfbef4b2ca",
+  "version": "('17.0.1+9f44802-modified', 17, 0, 1)",
+  "core_sha256": "d78c9c1c1f93f502f82d90daaae3ea9adc83fc34bda56efd2c0fd9d488a92c37",
+  "patch_sha256": "25e61e689bbb6be651dc95254ff2ef3d14663708efad42eb5cb69258043dd179",
+  "cunls_lm_patch_sha256": "1fb1551fdc8d5088079fb558ab8468cd7d7191e62db13127777ff80c3214f671",
+  "cunls_dependency_source": "/nas/shared/baidx/cuvslam_runs/vio_state_consistency_audit_20261119/deps/cunls",
+  "ctest_targets_passed": 22,
+  "deliberate_nonfinite_gain_events_seen_in_unit_test": 3,
+  "runtime_core_path": "/nas/shared/baidx/cuvslam_runs/vio_state_consistency_audit_20261119/candidate_lm/runtime/cuvslam/libcuvslam.so",
+  "comparison_source": "results/fixed_lm",
+  "all_six_input_and_pose_gravity_timestamp_bytes_match": true,
+  "total_full_replay_frames": 18643,
+  "ctest_note": "ctest_final_lm.log: 22/22 passed. Later ctest_audit_final.log: 21/22; seed37027 SVD determinant test fails identically on published v1.35 and candidate; not a new regression.",
+  "v135_core_sha256": "796ad813aadd4be9528c8c3e1b4dd05ee294accb356b276f7fda9c56002fa996"
+}

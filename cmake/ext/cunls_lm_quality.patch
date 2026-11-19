@@ -1,0 +1,15 @@
+--- a/cunls/minimizer/levenberg_marquardt_minimizer.cpp
++++ b/cunls/minimizer/levenberg_marquardt_minimizer.cpp
+@@ -18,0 +19 @@
++#include <cmath>
+@@ -202,0 +204,7 @@
++  // NaN comparisons are false in both directions; reject explicitly so the
++  // caller cannot fall through to copying an unaccepted trial state.
++  if (!std::isfinite(step_quality)) {
++    LogError("LM_NONFINITE_GAIN_REJECT");
++    lambda_ = std::min(options_.lambda_max, std::max(options_.lambda_min, lambda_ * options_.lambda_upscale));
++    return true;
++  }
+@@ -224 +232 @@
+-  if (step_quality >= options_.step_accept_threshold) {
++  if (std::isfinite(step_quality) && step_quality >= options_.step_accept_threshold) {

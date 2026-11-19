@@ -158,10 +158,15 @@ void PNPSolver::build_hessian(const Isometry3T& rig_from_world, Matrix6T& H, Vec
 
 using obs_ref = std::reference_wrapper<const camera::Observation>;
 
-bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
+bool PNPSolver::solve(Isometry3T& output_pose, Matrix6T& output_info,
                       const std::vector<camera::Observation>& observations,
                       const std::unordered_map<TrackId, Vector3T>& landmarks, const PNPSettings& settings) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("solve");
+  Isometry3T rig_from_world = output_pose;
+  Matrix6T static_info_exp;
+  if (!rig_from_world.matrix().allFinite()) {
+    return false;
+  }
 
   if (settings.max_iteration < 0 || settings.max_obs_per_camera < 0 || settings.min_observations < 0) {
     TraceError("PNPSettings count fields must be non-negative");
@@ -189,7 +194,8 @@ bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
 
     for (const auto& obs : observations) {
       auto it = landmarks.find(obs.id);
-      if (it == landmarks.end()) {
+      if (it == landmarks.end() || obs.cam_id >= rig_.num_cameras || !obs.xy.allFinite() || !obs.xy_info.allFinite() ||
+          !it->second.allFinite()) {
         continue;
       }
       obs_per_camera_[obs.cam_id].emplace_back(std::cref(obs));
@@ -225,7 +231,22 @@ bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
   Matrix6T H;
   Vector6T rhs;
 
+  // Raw optical tracks can all be unmatched or behind the camera. They do not
+  // provide the zero-cost, well-observed solution implied by the old fast path.
+  size_t visible = 0;
+  build_camera_from_world(rig_from_world);
+  for (size_t i = 0; i < observations_.size(); ++i) {
+    const auto& o = observations_[i].get();
+    const Vector3T pc = cam_from_w_[o.cam_id] * landmark_for_observation_[i].get();
+    visible += pc.allFinite() && pc.z() > settings.point_z_thresh;
+  }
+  if (visible < std::max(size_t(1), min_observations)) {
+    return false;
+  }
   auto initial_cost = evaluate_cost(rig_from_world, settings);
+  if (!std::isfinite(initial_cost)) {
+    return false;
+  }
   if (initial_cost < 5e-3f) {
     // Nothing to minimize. We have a "pendulum" effect on still frames otherwise.
     static_info_exp.setIdentity();
@@ -233,6 +254,8 @@ bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
     RERUN(logLandmarks, landmark_for_observation_, camera_from_world, rig_.intrinsics[0],
           "world/camera_0/images/landmarks_pnp_final", Color(0, 255, 0));
 
+    output_pose = rig_from_world;
+    output_info = static_info_exp;
     return true;
   }
   auto current_cost = initial_cost;
@@ -248,7 +271,13 @@ bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
 
     Matrix6T augmented_system = H + (lambda * scaling).asDiagonal().toDenseMatrix();
     auto decomposition = augmented_system.ldlt();
+    if (decomposition.info() != Eigen::Success) {
+      return false;
+    }
     Vector6T step = decomposition.solve(-rhs);
+    if (!step.allFinite()) {
+      return false;
+    }
 
     Isometry3T guess;
     math::Exp(guess, step);
@@ -318,7 +347,12 @@ bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
     RERUN(clearViewport, "world/camera_0/images/landmarks_pnp_final");
   }
 
-  return status;
+  if (status && rig_from_world.matrix().allFinite() && static_info_exp.allFinite()) {
+    output_pose = rig_from_world;
+    output_info = static_info_exp;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace cuvslam::pnp

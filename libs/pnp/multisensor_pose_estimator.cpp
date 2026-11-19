@@ -17,6 +17,9 @@
 #include "pnp/multisensor_pose_estimator.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <optional>
 
 #include <cunls/common/device_vector.h>
@@ -75,7 +78,9 @@ void FilterObservations(const std::vector<camera::Observation>& observations,
   }
 
   for (const auto& obs : observations) {
-    if (landmarks.count(obs.id)) {
+    const auto point = landmarks.find(obs.id);
+    if (obs.cam_id < num_cameras && obs.xy.allFinite() && obs.xy_info.allFinite() && point != landmarks.end() &&
+        point->second.allFinite()) {
       obs_per_camera[obs.cam_id].emplace_back(std::cref(obs));
     }
   }
@@ -145,7 +150,12 @@ MultisensorPoseEstimator::MultisensorPoseEstimator(const camera::Rig& rig, const
       d_cam_from_rig_(kMaxObsPerCamera * rig.num_cameras),
       d_pose_(1),
       d_planes_(kMaxPlanes),
-      minimizer_(CreateLMMinimizerOptions(settings)) {}
+      minimizer_(CreateLMMinimizerOptions(settings)) {
+  // Diagnostics only: cuNLS otherwise initializes its logger as Silent.
+  if (std::getenv("VIO_AUDIT_CUNLS_LOG")) {
+    cunls::SetLoggerOptions(cunls::Verbosity::Error);
+  }
+}
 
 bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
                                      const std::vector<camera::Observation>& observations,
@@ -155,6 +165,17 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
                                      const std::optional<InertialPriorInput>& imu_in,
                                      InertialPosteriorOutput* imu_out) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("solve");
+
+  // This solver uses a right SE3 update. Invalid input must not reach SVD or CUDA,
+  // and a rejected result must leave every output at the caller's accepted state.
+  const auto valid_pose = [](const Isometry3T& pose) {
+    return pose.matrix().allFinite() && pose.linear().determinant() > 0.f &&
+           (pose.linear().transpose() * pose.linear()).isApprox(Matrix3T::Identity(), 1e-4f);
+  };
+  if (!valid_pose(rig_from_world)) {
+    TraceMessage("PNP_REJECT reason=invalid_input_pose");
+    return false;
+  }
 
   {
     TRACE_EVENT filter_ev = profiler_domain_.trace_event("filter");
@@ -167,9 +188,25 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
                                          [](const RGBDInfo* depth_info) { return depth_info != nullptr; });
 
   if (n < settings_.min_observations && num_depth == 0 && !imu_in.has_value()) {
-    static_info_exp.setZero();
     return false;
   }
+
+  const auto visible_count = [&](const Isometry3T& pose) {
+    size_t count = 0;
+    for (size_t i = 0; i < n; ++i) {
+      const Vector3T pc = rig_.camera_from_rig[filtered_obs_[i].cam_id] * pose * matched_landmarks_[i];
+      count += pc.allFinite() && pc.z() >= 1e-3f;
+    }
+    return count;
+  };
+  const bool visual_only = num_depth == 0 && !imu_in.has_value();
+  const size_t required = std::max(size_t(1), settings_.min_observations);
+  const size_t initial_visible = visible_count(rig_from_world);
+  if (visual_only && initial_visible < required) {
+    TraceMessage("PNP_REJECT reason=initial_visibility visible=%zu matched=%zu", initial_visible, n);
+    return false;
+  }
+  cunls::MinimizerSummary summary;
 
   cudaStream_t s = stream_.get_stream();
 
@@ -388,7 +425,6 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
   }
 
   if (num_factor_batches == 0) {
-    static_info_exp.setZero();
     return false;
   }
 
@@ -396,15 +432,24 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
     TRACE_EVENT minimize_ev = profiler_domain_.trace_event("minimizer");
     // Visual PnP and its inertial prior share the same six-DoF active pose.
     // The prior adds residual rows but does not add active state variables.
-    minimizer_.Minimize(s, problem, num_depth == 0);
+    summary = minimizer_.Minimize(s, problem, num_depth == 0);
   }
 
   d_pose_.copy(cuda::ToCPU, s);
   CUDA_CHECK(cudaStreamSynchronize(s));
-  rig_from_world = IsometryFromSE3Transform(d_pose_[0]);
+  Isometry3T candidate = IsometryFromSE3Transform(d_pose_[0]);
+  // All-behind-camera factors evaluate to zero in cuNLS. Zero cost alone is
+  // therefore not evidence that a valid visual pose was found.
+  const float tolerance = 64.f * std::numeric_limits<float>::epsilon() * std::max(1.f, summary.initial_cost);
+  if (!valid_pose(candidate) || !std::isfinite(summary.initial_cost) || !std::isfinite(summary.final_cost) ||
+      summary.final_cost > summary.initial_cost + tolerance || (visual_only && visible_count(candidate) < required)) {
+    TraceMessage("PNP_REJECT reason=candidate matched=%zu initial_visible=%zu cost_before=%.9g cost_after=%.9g", n,
+                 initial_visible, summary.initial_cost, summary.final_cost);
+    return false;
+  }
 
   // Project to SO(3) via SVD to correct numerical drift from iterative optimization.
-  rig_from_world.linear() = common::CalculateRotationFromSVD(rig_from_world.matrix());
+  candidate.linear() = common::CalculateRotationFromSVD(candidate.matrix());
 
   // Posterior inertial state.  The inertial factor uses prev_velocity / biases as baked-in
   // constants, so this LM does not refine them — surface the input values unchanged and let the
@@ -415,6 +460,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
     imu_out->acc_bias = imu_in->prev_acc_bias;
   }
 
+  rig_from_world = candidate;
   static_info_exp = Matrix6T::Identity();
   return true;
 }

@@ -14,7 +14,12 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <cunls/common/device_vector.h>
+#include <cunls/factor/pnp_factor_batch.h>
+#include <cunls/state/se3_state_batch.h>
+#include <limits>
 #include <random>
+#include "pnp/multicam_pnp.h"
 
 #include "common/include_gtest.h"
 #include "common/isometry.h"
@@ -159,7 +164,7 @@ TEST(MultisensorPoseEstimatorTest, InertialPriorWithoutResidualsFails) {
   bool ok = true;
   EXPECT_NO_THROW(ok = estimator.solve(pose, info, obs, landmarks, {}, {}, {}, imu_in));
   EXPECT_FALSE(ok);
-  EXPECT_TRUE(info.isZero());
+  EXPECT_TRUE(info.isIdentity());
 }
 
 // Multi-camera rig: verify that per-observation camera_from_rig extrinsics
@@ -222,4 +227,128 @@ TEST(MultisensorPoseEstimatorTest, MultiCameraReprojectionConvergence) {
   EXPECT_LT(trans_err, 0.02f) << "Translation error too large: " << trans_err;
 }
 
+// Appended inside namespace test::pnp; exercises real CUDA kernels.
+TEST(MultisensorPoseEstimatorTest, BehindCameraCannotBeSuccessfulPnP) {
+  auto cam = MakePinhole();
+  auto rig = MakeRig(cam);
+  std::mt19937 rng(123);
+  const auto landmarks = GenerateLandmarks(Isometry3T::Identity(), 50, rng);
+  const auto observations = ProjectLandmarks(landmarks, Isometry3T::Identity());
+  Isometry3T pose = Isometry3T::Identity();
+  pose.linear() = Eigen::AngleAxisf(float(PI), Vector3T::UnitY()).toRotationMatrix();
+  const auto original = pose;
+  Matrix6T info = Matrix6T::Identity() * 37.f;
+  cuvslam::pnp::MultisensorPoseEstimator estimator(rig);
+  EXPECT_FALSE(estimator.solve(pose, info, observations, landmarks));
+  EXPECT_TRUE((pose.matrix().array() == original.matrix().array()).all());
+  EXPECT_TRUE((info.array() == (Matrix6T::Identity() * 37.f).array()).all());
+}
+
+TEST(MultisensorPoseEstimatorTest, InvalidInputDoesNotMutateOutputs) {
+  auto cam = MakePinhole();
+  auto rig = MakeRig(cam);
+  std::mt19937 rng(123);
+  const auto landmarks = GenerateLandmarks(Isometry3T::Identity(), 50, rng);
+  const auto observations = ProjectLandmarks(landmarks, Isometry3T::Identity());
+  Isometry3T pose = Isometry3T::Identity();
+  pose.translation().z() = std::numeric_limits<float>::infinity();
+  Matrix6T info = Matrix6T::Identity() * 37.f;
+  cuvslam::pnp::MultisensorPoseEstimator estimator(rig);
+  EXPECT_FALSE(estimator.solve(pose, info, observations, landmarks));
+  EXPECT_TRUE(std::isinf(pose.translation().z()));
+  EXPECT_TRUE((info.array() == (Matrix6T::Identity() * 37.f).array()).all());
+}
+
+TEST(MultisensorPoseEstimatorTest, RealCudaPlusMatchesFourCameraJacobian) {
+  Isometry3T pose = Isometry3T::Identity();
+  pose.linear() = Eigen::AngleAxisf(.8f, Vector3T(1, -2, 3).normalized()).toRotationMatrix();
+  pose.translation() = Vector3T(1.2f, -.7f, .8f);
+  auto pack = [](const Isometry3T& m) {
+    cunls::SE3Transform x;
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 4; ++j) x[4 * i + j] = m.matrix()(i, j);
+    return x;
+  };
+  std::vector<cunls::SE3Transform> ex;
+  std::vector<cunls::Vector<3>> points;
+  std::vector<cunls::Vector<2>> observations;
+  std::vector<Vector2T> expected;
+  for (int c = 0; c < 4; ++c) {
+    Isometry3T e = Isometry3T::Identity();
+    e.linear() = Eigen::AngleAxisf(.1f * c, Vector3T(1, 2, -1).normalized()).toRotationMatrix();
+    e.translation() = Vector3T(.2f * c, -.08f * c, .04f * c);
+    for (int j = 0; j < 5; ++j) {
+      const Vector3T world = pose.inverse() * Vector3T(.2f * j - .4f, .1f * j - .2f, 4.f + .2f * j);
+      const Vector3T pc = e * pose * world;
+      ex.push_back(pack(e));
+      points.push_back({world.x(), world.y(), world.z()});
+      observations.push_back({0.f, 0.f});
+      expected.push_back(pc.hnormalized());
+    }
+  }
+  const auto packed = pack(pose);
+  cunls::DeviceVector<float> state(std::vector<float>(packed.begin(), packed.end()));
+  cunls::DeviceVector<cunls::SE3Transform> extrinsics(ex);
+  cunls::DeviceVector<cunls::Vector<3>> landmarks(points);
+  cunls::DeviceVector<cunls::Vector<2>> xy(observations);
+  cunls::DeviceVector<float*> pointers(std::vector<float*>(points.size(), state.data()));
+  cunls::DeviceVector<float> residual(2 * points.size()), jacobian(12 * points.size()), trial(16), delta(6);
+  cunls::DeviceVector<float*> trial_ptrs(std::vector<float*>(points.size(), trial.data()));
+  cunls::cuBLASHandle handle;
+  cunls::SE3StateBatch states(handle, state.data(), 1);
+  cunls::PnPFactorBatch factor(xy.data(), extrinsics.data(), landmarks.data(), points.size(), 1e-3f);
+  ASSERT_TRUE(factor.Evaluate(residual.data(), jacobian.data(), pointers.data(), 0));
+  std::vector<float> r(2 * points.size()), J(12 * points.size());
+  ASSERT_EQ(cudaMemcpy(r.data(), residual.data(), r.size() * sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+  ASSERT_EQ(cudaMemcpy(J.data(), jacobian.data(), J.size() * sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+  for (size_t i = 0; i < points.size(); ++i)
+    for (int k = 0; k < 2; ++k) EXPECT_NEAR(r[2 * i + k], expected[i][k], 2e-6f);
+  double worst = 0;
+  for (int c = 0; c < 6; ++c) {
+    std::vector<float> sides[2];
+    for (int side = 0; side < 2; ++side) {
+      float d[6]{};
+      d[c] = (side == 0 ? 1.f : -1.f) * 2e-4f;
+      ASSERT_EQ(cudaMemcpy(delta.data(), d, sizeof(d), cudaMemcpyHostToDevice), cudaSuccess);
+      states.Plus(state.data(), delta.data(), trial.data(), 0);
+      ASSERT_TRUE(factor.Evaluate(residual.data(), nullptr, trial_ptrs.data(), 0));
+      sides[side].resize(r.size());
+      ASSERT_EQ(cudaMemcpy(sides[side].data(), residual.data(), r.size() * sizeof(float), cudaMemcpyDeviceToHost),
+                cudaSuccess);
+    }
+    for (size_t k = 0; k < r.size(); ++k)
+      worst = std::max(worst, std::abs(double((sides[0][k] - sides[1][k]) / 4e-4f - J[6 * k + c])));
+  }
+  RecordProperty("cuda_plus_jacobian_max_abs_error", std::to_string(worst));
+  EXPECT_LT(worst, .003);
+}
+
+TEST(MultisensorPoseEstimatorTest, CpuPnPNeedsMatchedVisibleObservations) {
+  auto cam = MakePinhole();
+  auto rig = MakeRig(cam);
+  cuvslam::pnp::PNPSolver solver(rig);
+  std::vector<camera::Observation> obs;
+  std::unordered_map<TrackId, Vector3T> points;
+  for (int i = 0; i < 20; ++i) obs.emplace_back(0, i, Vector2T(.1f, .1f), Matrix2T::Identity());
+  points.emplace(999, Vector3T(0, 0, 3));
+  Isometry3T pose = Isometry3T::Identity();
+  Matrix6T info = Matrix6T::Identity() * 37.f;
+  EXPECT_FALSE(solver.solve(pose, info, obs, points, cuvslam::pnp::PNPSettings{}));
+  EXPECT_TRUE((info.array() == (Matrix6T::Identity() * 37.f).array()).all());
+}
+
+// Address protected base virtual slots; calls still dispatch to the actual LM override.
+class MinimizerControlAccess : public cunls::GaussNewtonMinimizer {
+public:
+  static auto reject() { return &MinimizerControlAccess::RejectStep; }
+  static auto accept() { return &MinimizerControlAccess::AcceptStep; }
+};
+TEST(MultisensorPoseEstimatorTest, NonfiniteLMStepQualityMustReject) {
+  cunls::LevenbergMarquardtMinimizer lm;
+  for (float q : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+                  -std::numeric_limits<float>::infinity()}) {
+    EXPECT_TRUE((lm.*MinimizerControlAccess::reject())(q));
+    EXPECT_FALSE((lm.*MinimizerControlAccess::accept())(q));
+  }
+}
 }  // namespace test::pnp
