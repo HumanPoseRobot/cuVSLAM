@@ -22,6 +22,7 @@
 #include "common/statistic.h"
 #include "epipolar/camera_projection.h"
 #include "epipolar/camera_selection.h"
+#include "epipolar/resectioning_utils_internal.h"
 #include "epipolar/test/generate_points_in_cube_test.h"
 #include "epipolar/test/resectioning_utils_test.h"
 #include "pnp/multicam_pnp.h"
@@ -413,6 +414,84 @@ TEST_F(ResectioningUtilsTest, StartWithWorldCoordinatesExpMap) {
   //    rig.num_cameras = 1;
   //    rig.camera_from_rig[0].setIdentity();
   //    RunPoseRefinement(rig);
+}
+
+template <int Dim>
+void CheckAbsoluteTwistJacobian(bool robust) {
+  Isometry3T camera = Isometry3T::Identity();
+  camera.linear() = Rotation3T(Vector3T(0.55f, -0.35f, 0.2f), AngleUnits::Radian).matrix();
+  camera.translation() = Vector3T(0.3f, -0.2f, 0.4f);
+  Vector3TVector points;
+  Vector2TVector observed;
+  for (int i = 0; i < 15; ++i) {
+    points.emplace_back(0.15f * (i % 5 - 2), 0.2f * (i / 5 - 1), 4.f + 0.2f * i);
+    observed.emplace_back(Project3DPoint<2>(camera * points.back()));
+  }
+  if (robust) {
+    observed[0] += Vector2T(2.5f, -3.f);
+  }
+  SurveyedTrackingParams params(points.cbegin(), points.cend(), observed.cbegin(), observed.cend(), 1.f);
+  params.cameraCenter = Vector3T(0.4f, -0.6f, 0.2f);
+  SurveyedTracking<Dim> functor(params);
+  typename SurveyedTracking<Dim>::InputType input(camera);
+  typename SurveyedTracking<Dim>::JacobianType analytic(30, Dim), numeric(30, Dim);
+  functor.df(input, analytic);
+  for (int j = 0; j < Dim; ++j) {
+    auto plus = input, minus = input;
+    plus[j] += 0.001f;
+    minus[j] -= 0.001f;
+    typename SurveyedTracking<Dim>::ValueType fp(30), fm(30);
+    functor(plus, fp);
+    functor(minus, fm);
+    numeric.col(j) = (fp - fm) / 0.002f;
+  }
+  const float error = (analytic - numeric).cwiseAbs().maxCoeff();
+  ::testing::Test::RecordProperty("jacobian_max_abs_error", std::to_string(error));
+  EXPECT_LT(error, 0.003f);
+}
+
+TEST(ResectioningRegressionTest, AbsoluteTwistJacobianMatchesCentralDifferences) {
+  CheckAbsoluteTwistJacobian<6>(false);
+}
+TEST(ResectioningRegressionTest, RobustJacobianMatchesCentralDifferences) { CheckAbsoluteTwistJacobian<6>(true); }
+TEST(ResectioningRegressionTest, FixedCenterRotationJacobianMatchesCentralDifferences) {
+  CheckAbsoluteTwistJacobian<3>(false);
+}
+TEST(ResectioningRegressionTest, RobustFixedCenterRotationJacobianMatchesCentralDifferences) {
+  CheckAbsoluteTwistJacobian<3>(true);
+}
+
+TEST(ResectioningRegressionTest, RotationOnlyPreservesNonzeroCameraCenter) {
+  Isometry3T expected = Isometry3T::Identity();
+  expected.linear() = Rotation3T(Vector3T(0.3f, 0.2f, -0.1f), AngleUnits::Radian).matrix();
+  expected.translation() = Vector3T(0.4f, -0.6f, 0.2f);
+  Vector3TVector points;
+  Vector2TVector observed;
+  for (int i = 0; i < 40; ++i) {
+    Vector3T local(0.25f * (i % 8 - 3), 0.2f * (i / 8 - 2), 3.f + 0.05f * i);
+    points.emplace_back(expected * local);
+    observed.emplace_back(Project3DPoint<2>(local));
+  }
+  Isometry3T actual = expected * Rotation3T(Vector3T(0.2f, -0.15f, 0.1f), AngleUnits::Radian);
+  EXPECT_TRUE(
+      OptimizeCameraExtrinsicsExpMap<3>(points.cbegin(), points.cend(), observed.cbegin(), observed.cend(), actual));
+  EXPECT_LT((actual.translation() - expected.translation()).norm(), 0.00001f);
+  EXPECT_LT((actual.linear() - expected.linear()).norm(), 0.001f);
+}
+
+TEST(ResectioningRegressionTest, RejectedRefinementPreservesInputPose) {
+  Vector3TVector points;
+  Vector2TVector observed;
+  for (int i = 0; i < 40; ++i) {
+    points.emplace_back(0.2f * (i % 8 - 3), 0.15f * (i / 8 - 2), 4.f + 0.1f * i);
+    observed.emplace_back((i % 2 ? 1.f : -1.f) * 1000.f, (i % 3 ? 1.f : -1.f) * 1000.f);
+  }
+  Isometry3T pose = Isometry3T::Identity();
+  pose.translation() = Vector3T(0.1f, 0.2f, -0.1f);
+  const Isometry3T original = pose;
+  EXPECT_FALSE(
+      OptimizeCameraExtrinsicsExpMap<6>(points.cbegin(), points.cend(), observed.cbegin(), observed.cend(), pose));
+  EXPECT_TRUE((pose.matrix().array() == original.matrix().array()).all());
 }
 
 }  // namespace test::epipolar

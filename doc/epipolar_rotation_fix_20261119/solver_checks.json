@@ -1,0 +1,31 @@
+{
+  "ctest_targets_passed": 22,
+  "epipolar_tests_passed": 42,
+  "disabled_tests": 6,
+  "seed_count": 51,
+  "failed_seed_runs": 0,
+  "before_jacobian_max_abs_error": 0.341897517,
+  "after_jacobian_max_abs_error": {
+    "AbsoluteTwistJacobianMatchesCentralDifferences": 8.6e-05,
+    "RobustJacobianMatchesCentralDifferences": 9.5e-05,
+    "FixedCenterRotationJacobianMatchesCentralDifferences": 8.9e-05,
+    "RobustFixedCenterRotationJacobianMatchesCentralDifferences": 8.9e-05
+  },
+  "before_camera_center_error_m": 0.748331487,
+  "after_camera_center_error_test_bound_m": 1e-05,
+  "no_threshold_relaxation": true,
+  "rotation_errors_deg": {
+    "CameraRotatedExpMap": {
+      "before": 8.76224356093568,
+      "after": 1.0966927860819575e-05
+    },
+    "CameraRotatedAndTranslatedExpMap": {
+      "before": 9.029471076584697,
+      "after": 8.954470901202071e-06
+    },
+    "CameraRotatedPointsFarAwayExpMap": {
+      "before": 8.76132682846347,
+      "after": 1.5585769830487193e-05
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "base_commit": "7ac651f613fc9074bc161887530eb04778131ae1",
+  "source_status": "independent uncommitted experiment",
+  "patch_sha256": "6b61e1f12e3732cc34a9e2d4f890c6046e8a1cd13e00df2cc9d280ceacfd1f5f",
+  "core_sha256": "8779d630528344fc190f81e7a7018281dbb48969771f9b47d3e867383868ead5",
+  "baseline_core_sha256": "796ad813aadd4be9528c8c3e1b4dd05ee294accb356b276f7fda9c56002fa996",
+  "ctest_targets_passed": 22,
+  "epipolar_enabled_tests_passed": 42,
+  "epipolar_disabled_tests": 6,
+  "original_rotation_seed_runs": 51,
+  "original_rotation_seed_runs_failed": 0,
+  "full_replays": 4,
+  "full_replay_valid_frames": 8486,
+  "all_replayed_poses_bitwise_equal_to_v135": true,
+  "all_replayed_gravity_bitwise_equal_to_v135": true,
+  "release_binary_unchanged": true
+}

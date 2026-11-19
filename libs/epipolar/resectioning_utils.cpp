@@ -37,7 +37,8 @@ template <int _Size, bool _useRotPrealign>
 bool OptimizeCameraExtrinsicsExpMap(Vector3TVectorCIt points3DBeginIt, Vector3TVectorCIt points3DEndIt,
                                     Vector2TVectorCIt points2DBeginIt, Vector2TVectorCIt points2DEndIt,
                                     Isometry3T& cameraMatrix, const float hDelta) {
-  const SurveyedTrackingParams params(points3DBeginIt, points3DEndIt, points2DBeginIt, points2DEndIt, hDelta);
+  SurveyedTrackingParams params(points3DBeginIt, points3DEndIt, points2DBeginIt, points2DEndIt, hDelta);
+  params.cameraCenter = cameraMatrix.translation();
 
   if (params.pointCount3D() != params.pointCount2D()) {
     TraceError("The range of 2D and 3D points needs to be equal");
@@ -90,13 +91,20 @@ bool OptimizeCameraExtrinsicsExpMap(Vector3TVectorCIt points3DBeginIt, Vector3TV
     return false;
   }
 
-  cameraMatrix = twistRot.transform().inverse();
-
-  if (norm > RESIDUAL_NORM_THRESHOLD) {
+  if (!std::isfinite(norm) || norm > RESIDUAL_NORM_THRESHOLD) {
     // TraceMessage("LM norm: %f, fvec length: %d", norm, functor.values());
     return false;
   }
 
+  Isometry3T cameraFromWorld = twistRot.transform();
+  if constexpr (_Size == 3) {
+    cameraFromWorld.translation() = -cameraFromWorld.linear() * params.cameraCenter;
+  }
+  if (!cameraFromWorld.matrix().allFinite()) {
+    return false;
+  }
+  // Rejected refinement must not overwrite the caller's pose.
+  cameraMatrix = cameraFromWorld.inverse();
   return true;
 }
 

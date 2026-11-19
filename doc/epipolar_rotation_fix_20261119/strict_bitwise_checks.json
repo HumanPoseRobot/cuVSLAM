@@ -1,0 +1,22 @@
+{
+  "195610": {
+    "translation_m": true,
+    "quaternion_xyzw": true,
+    "gravity_rig_m_s2": true,
+    "timestamp_unix_ns": true
+  },
+  "data_test2": {
+    "translation_m": true,
+    "quaternion_xyzw": true,
+    "gravity_rig_m_s2": true,
+    "timestamp_unix_ns": true
+  },
+  "room2": {
+    "poses": true,
+    "timestamp_ns": true
+  },
+  "room6": {
+    "poses": true,
+    "timestamp_ns": true
+  }
+}

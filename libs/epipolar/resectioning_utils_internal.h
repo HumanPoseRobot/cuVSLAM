@@ -63,6 +63,8 @@ struct SurveyedTrackingParams {
   Vector2TVectorCIt p2DBegin;
   Vector2TVectorCIt p2DEnd;
   float huberDelta;
+  // Rotation-only refinement keeps the original optical center in world coordinates.
+  Vector3T cameraCenter = Vector3T::Zero();
   SurveyedTrackingParams(const SurveyedTrackingParams&) = default;
   SurveyedTrackingParams(Vector3TVectorCIt b3D, Vector3TVectorCIt e3D, Vector2TVectorCIt b2D, Vector2TVectorCIt e2D,
                          float hDelta)
@@ -96,7 +98,7 @@ public:
       : SurveyedTracking(SurveyedTrackingParams(b3D, e3D, b2D, e2D, hDelta)) {}
 
   int operator()(const InputType& input, ValueType& fvec) const {
-    const Isometry3T cameraFromWorld = input.transform();
+    const Isometry3T cameraFromWorld = cameraTransform(input);
     auto observation = params_.p2DBegin;
     int residualRow = 0;
 
@@ -113,21 +115,41 @@ public:
 
   int df(const InputType& input, JacobianType& fjac) const {
     CameraDerivs derivs;
-    const Isometry3T cameraFromWorld = input.transform();
-    auto point = params_.p3DBegin;
-
-    for (int i = 0; i < Base::values(); point++) {
+    const Isometry3T cameraFromWorld = cameraTransform(input);
+    MatrixMN<float, _Size, _Size> coordinateJacobian;
+    if constexpr (_Size == 6) {
+      coordinateJacobian = math::se3_twist_left_jacobian(input);
+    } else {
+      coordinateJacobian = math::twist_left_jacobian(input);
+    }
+    auto observation = params_.p2DBegin;
+    int row = 0;
+    for (auto point = params_.p3DBegin; point != params_.p3DEnd; ++point, ++observation) {
       InputDerivsCalculator::calcCamDerivs(*point, cameraFromWorld, derivs);
-      fjac.row(i++) = derivs.row(0);
-      fjac.row(i++) = derivs.row(1);
-
-      TestDerivatives(*point, cameraFromWorld, derivs);
+      // The projection derivative is for a left perturbation Exp(d) * T.
+      // Stock Eigen LM adds absolute log coordinates, so apply the chain rule.
+      derivs = (derivs * coordinateJacobian).eval();
+      const Vector2T residual = *observation - Project3DPoint<2>(cameraFromWorld * *point);
+      for (int axis = 0; axis < 2; ++axis) {
+        const float robust = costFunctionHuber(residual[axis], params_.huberDelta);
+        const float weight =
+            std::abs(residual[axis]) >= params_.huberDelta ? params_.huberDelta / std::abs(robust) : 1.f;
+        fjac.row(row++) = weight * derivs.row(axis);
+      }
     }
 
     return 0;
   }
 
 private:
+  Isometry3T cameraTransform(const InputType& input) const {
+    Isometry3T pose = input.transform();
+    if constexpr (_Size == 3) {
+      pose.translation() = -pose.linear() * params_.cameraCenter;
+    }
+    return pose;
+  }
+
   const SurveyedTrackingParams params_;
 
   void TestDerivatives(const Vector3T& point, const Isometry3T& cameraFromWorld, const CameraDerivs& derivs) const {
@@ -246,6 +268,9 @@ public:
 
   int operator()(const InputType& input, ValueType& fvec) const {
     Isometry3T camMatInverse = input.transform();
+    if constexpr (_Size == 3) {
+      camMatInverse.translation() = -camMatInverse.linear() * params_.cameraCenter;
+    }
     size_t fvecIndx = 0;
     auto tt = params_.p2DBegin;
     auto p3dIt = params_.p3DBegin;
