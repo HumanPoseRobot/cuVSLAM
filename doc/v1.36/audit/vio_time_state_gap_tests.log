@@ -1,0 +1,36 @@
+Note: Google Test filter = ImuBoundaryTest.*:ImuVelocityTest.*
+[==========] Running 12 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 9 tests from ImuBoundaryTest
+[ RUN      ] ImuBoundaryTest.ExactCameraEndpoints
+[       OK ] ImuBoundaryTest.ExactCameraEndpoints (0 ms)
+[ RUN      ] ImuBoundaryTest.StationaryAccelerationAnalytic
+[       OK ] ImuBoundaryTest.StationaryAccelerationAnalytic (0 ms)
+[ RUN      ] ImuBoundaryTest.InterpolatesBracketingMeasurements
+[       OK ] ImuBoundaryTest.InterpolatesBracketingMeasurements (0 ms)
+[ RUN      ] ImuBoundaryTest.ReintegrationKeepsFractionalDurations
+[       OK ] ImuBoundaryTest.ReintegrationKeepsFractionalDurations (0 ms)
+[ RUN      ] ImuBoundaryTest.RejectsFutureOnlyAndStaleCoverage
+[       OK ] ImuBoundaryTest.RejectsFutureOnlyAndStaleCoverage (0 ms)
+[ RUN      ] ImuBoundaryTest.CausalTailCoversOnlyRequestedFraction
+[       OK ] ImuBoundaryTest.CausalTailCoversOnlyRequestedFraction (0 ms)
+[ RUN      ] ImuBoundaryTest.RangeQueryNeverReturnsFutureSample
+[       OK ] ImuBoundaryTest.RangeQueryNeverReturnsFutureSample (0 ms)
+[ RUN      ] ImuBoundaryTest.WhiteNoiseAndRandomWalkRespectDuration
+[       OK ] ImuBoundaryTest.WhiteNoiseAndRandomWalkRespectDuration (0 ms)
+[ RUN      ] ImuBoundaryTest.CameraDropGapPreservesFullDurationAndReintegration
+[       OK ] ImuBoundaryTest.CameraDropGapPreservesFullDurationAndReintegration (0 ms)
+[----------] 9 tests from ImuBoundaryTest (0 ms total)
+
+[----------] 3 tests from ImuVelocityTest
+[ RUN      ] ImuVelocityTest.TranslationHasCorrectSign
+[       OK ] ImuVelocityTest.TranslationHasCorrectSign (0 ms)
+[ RUN      ] ImuVelocityTest.PureRotationAtNonzeroPositionHasZeroVelocity
+[       OK ] ImuVelocityTest.PureRotationAtNonzeroPositionHasZeroVelocity (0 ms)
+[ RUN      ] ImuVelocityTest.TimestampGapAndHeadRotationDoNotInflateVelocity
+[       OK ] ImuVelocityTest.TimestampGapAndHeadRotationDoNotInflateVelocity (0 ms)
+[----------] 3 tests from ImuVelocityTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 2 test suites ran. (0 ms total)
+[  PASSED  ] 12 tests.

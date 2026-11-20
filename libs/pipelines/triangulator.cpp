@@ -17,7 +17,10 @@
 
 #include "pipelines/triangulator.h"
 
-#include <numeric>
+#include <algorithm>
+#include <cstdlib>
+#include <unordered_map>
+#include "pipelines/triangulation_validation.h"
 
 #include "epipolar/camera_selection.h"
 
@@ -43,7 +46,9 @@ std::vector<Landmark> MulticamTriangulator::triangulate(const Isometry3T& world_
   obs_map.reserve(observations.size());
 
   for (const auto& obs : observations) {
-    obs_map[obs.id].push_back(std::cref(obs));
+    if (obs.cam_id < rig_.num_cameras && obs.xy.allFinite() && obs.xy_info.allFinite()) {
+      obs_map[obs.id].push_back(std::cref(obs));
+    }
   }
 
   visible_tracks_.clear();
@@ -69,25 +74,32 @@ std::vector<Landmark> MulticamTriangulator::triangulate(const Isometry3T& world_
       // measures how orthogonal the rays are (sine of the angle between them)
       float pm;
       if (epipolar::OptimalTriangulation(cam1_from_cam2, o1.xy, o2.xy, xyz, pm, ts)) {
-        out.push_back({track_id, world_from_cam1 * xyz});
+        const Vector3T point_world = world_from_cam1 * xyz;
+        if (std::getenv("VIO_TRIANGULATION_GEOMETRY") &&
+            !TriangulationObservationsConsistent(rig_, world_from_rig, point_world, obs_refs)) {
+          continue;
+        }
+        out.push_back({track_id, point_world});
         triangulated_tracks_.insert(track_id);
       }
     }
   }
 
-  visible_traingulated_tracks_.clear();
-  std::set_intersection(visible_tracks_.begin(), visible_tracks_.end(), triangulated_tracks_.begin(),
-                        triangulated_tracks_.end(),
-                        std::inserter(visible_traingulated_tracks_, visible_traingulated_tracks_.begin()));
-
-  triangulated_tracks_ = visible_traingulated_tracks_;
+  // std::set_intersection requires sorted ranges. These are unordered_sets:
+  // intersect by membership so a visible cached track is never re-created.
+  for (auto it = triangulated_tracks_.begin(); it != triangulated_tracks_.end();) {
+    if (visible_tracks_.count(*it) == 0) {
+      it = triangulated_tracks_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 
   return out;
 }
 
 void MulticamTriangulator::reset() {
   visible_tracks_.clear();
-  visible_traingulated_tracks_.clear();
   triangulated_tracks_.clear();
 }
 }  // namespace cuvslam::pipelines

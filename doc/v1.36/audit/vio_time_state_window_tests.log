@@ -1,0 +1,14 @@
+Numeric range, invalid rotation/index and rotation boundary tests passed
+Near-pi rotation value and Jacobian continuity passed
+FP64 quadratic predicted reduction and zero-landmark solve passed
+independent finite-difference Jacobian worst=9.8109e-05
+FP64 CPU/GPU normal solve and shared LM agree, residual=5.2134e-16
+six-state GPU solve: 5.86254 -> 3.0922e-08
+backend consistency gate accepts small updates and rejects invalid covariance / inconsistent corrections
+Schur linear term, square-root prior, and gauge rank tests passed
+GPU Jacobian sparse assembly matches independent dense Schur
+square-root projection/compression and ill-conditioned marginalization passed
+Nonzero window visual/prior finite-difference relative error=1.8617e-08
+FP64_COUNT_AUDIT count=3 cost_delta=8.88178e-16 step_delta=1.28174e-15
+FP64_COUNT_AUDIT count=4 cost_delta=1.42109e-14 step_delta=4.88888e-15
+FP64_COUNT_AUDIT count=6 cost_delta=1.42109e-14 step_delta=5.40193e-15

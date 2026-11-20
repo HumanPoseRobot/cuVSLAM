@@ -1,3 +1,6 @@
+#include <chrono>
+#include <thread>
+#include "sof/image_context.h"
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -104,3 +107,50 @@ TEST(ImageTest, Visual_GF2TFeatureDetectorTest) {
 }
 
 }  // namespace test::sof
+
+#ifdef USE_CUDA
+TEST(ImageContextGPU, CrossStreamCacheWaitsForPixelsAndProvidesCompleteGradients) {
+  using namespace cuvslam;
+  constexpr int width = 128, height = 128;
+  sof::ImageContext context(ImageShape{width, height}, true, false);
+  ImageMeta meta;
+  meta.shape = {width, height};
+  context.set_image_meta(meta);
+  std::vector<uint8_t> pixels(width * height);
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      pixels[y * width + x] = uint8_t(20 + y + x % 10);
+    }
+  }
+  ImageSource source;
+  source.data = pixels.data();
+  source.image_encoding = ImageEncoding::MONO8;
+  cuda::Stream producer, consumer, reader;
+  CUDA_CHECK(cudaLaunchHostFunc(
+      producer.get_stream(), [](void *) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); }, nullptr));
+  ASSERT_TRUE(context.build_gpu_image_pyramid(source, false, producer.get_stream()));
+  ASSERT_TRUE(context.build_gpu_image_pyramid(source, false, consumer.get_stream()));
+  // A preceding X-only user must not poison an XY user's cached gradients.
+  ASSERT_TRUE(context.build_gpu_gradient_pyramid(true, consumer.get_stream()));
+  ASSERT_TRUE(context.build_gpu_gradient_pyramid(false, reader.get_stream()));
+  const auto &actual = context.gpu_gradient_pyramid().gradY()[0];
+  std::vector<float> values(width * height), expected(width * height);
+  CUDA_CHECK(cudaMemcpy2DAsync(values.data(), width * sizeof(float), actual.ptr(), actual.pitch(),
+                               width * sizeof(float), height, cudaMemcpyDeviceToHost, reader.get_stream()));
+  CUDA_CHECK(cudaStreamSynchronize(reader.get_stream()));
+  CUDA_CHECK(cudaStreamSynchronize(producer.get_stream()));
+  cuda::GPUGradientPyramid reference(width, height);
+  auto stream = reader.get_stream();
+  ASSERT_TRUE(reference.set(context.gpu_image_pyramid(), stream, false));
+  const auto &gy = reference.gradY()[0];
+  CUDA_CHECK(cudaMemcpy2DAsync(expected.data(), width * sizeof(float), gy.ptr(), gy.pitch(), width * sizeof(float),
+                               height, cudaMemcpyDeviceToHost, stream));
+  CUDA_CHECK(cudaStreamSynchronize(stream));
+  ASSERT_GT(std::abs(expected[(height / 2) * width + width / 2]), .01f);
+  for (int y = 8; y < height - 8; ++y) {
+    for (int x = 8; x < width - 8; ++x) {
+      ASSERT_NEAR(values[y * width + x], expected[y * width + x], 1e-6f);
+    }
+  }
+}
+#endif

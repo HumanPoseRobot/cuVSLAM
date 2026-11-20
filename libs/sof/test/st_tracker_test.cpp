@@ -1,3 +1,5 @@
+#include "sof/internal/calibrated_patch_warp.h"
+#include "sof/internal/calibrated_stereo_geometry.h"
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
@@ -194,3 +196,72 @@ TEST(STTracker, TrackRotatedImageFullMap) {
   }
 }
 }  // namespace test::sof
+
+TEST(CalibratedStereoPatch, HalfTurnIsNotTranslationOnly) {
+  using namespace cuvslam;
+  camera::FisheyeCameraModel camera(Vector2T(640, 640), Vector2T(200, 200), Vector2T(320, 320), 0, 0, 0, 0);
+  Matrix2T map;
+  const Matrix3T rotation = Eigen::AngleAxisf(float(M_PI), Vector3T::UnitZ()).toRotationMatrix();
+  ASSERT_TRUE(sof::CalibratedPatchWarp(camera, camera, rotation, Vector2T(400, 370), map));
+  EXPECT_LT((map + Matrix2T::Identity()).norm(), .002f);
+  EXPECT_TRUE(sof::PatchWarpRequired(map));
+  ASSERT_TRUE(sof::CalibratedPatchWarp(camera, camera, Matrix3T::Identity(), Vector2T(400, 370), map));
+  EXPECT_LT((map - Matrix2T::Identity()).norm(), .002f);
+  EXPECT_FALSE(sof::PatchWarpRequired(map));
+}
+TEST(CalibratedStereoPatch, MappingDirectionAndFailedProjectionAreExplicit) {
+  using namespace cuvslam;
+  camera::PinholeCameraModel camera(Vector2T(640, 640), Vector2T(200, 200), Vector2T(320, 320));
+  Matrix2T map;
+  const Matrix3T rotation = Eigen::AngleAxisf(float(M_PI / 2), Vector3T::UnitZ()).toRotationMatrix();
+  ASSERT_TRUE(sof::CalibratedPatchWarp(camera, camera, rotation, Vector2T(360, 340), map));
+  Matrix2T expected;
+  expected << 0, -1, 1, 0;
+  EXPECT_LT((map - expected).norm(), .002f);
+  map.setConstant(9.f);
+  const auto before = map;
+  const Matrix3T backward = Eigen::AngleAxisf(float(M_PI), Vector3T::UnitY()).toRotationMatrix();
+  EXPECT_FALSE(sof::CalibratedPatchWarp(camera, camera, backward, Vector2T(320, 320), map));
+  EXPECT_TRUE(map == before);
+}
+
+TEST(CalibratedStereoPatch, TranslationDispatchUsesGradientDirectionNotSceneThresholds) {
+  using namespace cuvslam;
+  EXPECT_TRUE(sof::TranslationPatchCompatible(Matrix2T::Identity()));
+  EXPECT_FALSE(sof::TranslationPatchCompatible(-Matrix2T::Identity()));
+  Matrix2T a;
+  a << .7f, -.1f, .1f, 1.4f;
+  EXPECT_TRUE(sof::TranslationPatchCompatible(a));
+  a << .1f, 2.f, 2.f, .1f;
+  EXPECT_FALSE(sof::TranslationPatchCompatible(a));
+  a << 1.f, 0.f, 0.f, -1.f;
+  EXPECT_FALSE(sof::TranslationPatchCompatible(a));
+}
+
+TEST(CalibratedStereoPatch, CameraAxesDispatchIsIndependentOfFisheyeBoundaryDerivative) {
+  using namespace cuvslam;
+  const Matrix3T parallel = Eigen::AngleAxisf(.02f, Vector3T::UnitY()).toRotationMatrix();
+  const Matrix2T parallel_axes = parallel.topLeftCorner<2, 2>();
+  EXPECT_TRUE(sof::TranslationPatchCompatible(parallel_axes));
+  const Matrix3T reversed = Eigen::AngleAxisf(float(M_PI), Vector3T::UnitZ()).toRotationMatrix();
+  const Matrix2T reversed_axes = reversed.topLeftCorner<2, 2>();
+  EXPECT_FALSE(sof::TranslationPatchCompatible(reversed_axes));
+}
+
+TEST(CalibratedStereoGeometry, ChecksNewSearchAgainstCalibrationAndOriginalMeasurementUncertainty) {
+  using namespace cuvslam;
+  auto T = Isometry3T::Identity();
+  T.linear() = Eigen::AngleAxisf(float(M_PI), Vector3T::UnitZ()).toRotationMatrix();
+  T.translation().x() = -.1f;
+  const Vector3T point(.3f, .6f, 3.f);
+  const Vector2T left = point.hnormalized();
+  const Vector2T right = (T * point).hnormalized();
+  const Matrix2T info = Matrix2T::Identity() * 40000.f;
+  EXPECT_TRUE(sof::ConsistentCalibratedStereo(T, left, info, right, info));
+  EXPECT_FALSE(sof::ConsistentCalibratedStereo(T, left, info, right + Vector2T(0, .1f), info));
+  EXPECT_FALSE(sof::ConsistentCalibratedStereo(T, left, -info, right, info));
+  // A small parallax is not rejected when the original observations agree.
+  const Vector3T distant(30.f, 60.f, 300.f);
+  const Vector2T distant_right = (T * distant).hnormalized();
+  EXPECT_TRUE(sof::ConsistentCalibratedStereo(T, distant.hnormalized(), info, distant_right, info));
+}

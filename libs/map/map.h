@@ -71,6 +71,10 @@ public:
   // for pnp
   Map<TrackId, Vector3T> get_recent_landmarks() const;
   void get_recent_landmarks(Map<TrackId, Vector3T>& out) const;
+  // Resolve current observation IDs through all still-live owners. A track can
+  // remain visible without having appeared in the most recent keyframe.
+  void get_observed_landmarks(const std::vector<camera::Observation>& observations,
+                              Map<TrackId, Vector3T>& out) const;
   TrackIdMap get_recent_landmarks(CameraId cam_id) const;
   void get_recent_landmarks(CameraId cam_id, TrackIdMap& out) const;
   struct KeyframeWithPreint {

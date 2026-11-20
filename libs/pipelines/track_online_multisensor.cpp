@@ -1,3 +1,8 @@
+#include <fstream>
+#include <iomanip>
+#include <unordered_set>
+#include <set>
+#include "pipelines/gpu_window/frontend_guard_adapter.h"
 #include "imu_runtime_options.h"
 
 /*
@@ -127,6 +132,9 @@ SolverSfMMultisensor::~SolverSfMMultisensor() = default;
 const camera::Rig& SolverSfMMultisensor::getRig() const { return rig_; }
 
 void SolverSfMMultisensor::reset() {
+  bootstrap_refresh_requested_ = false;
+  bootstrap_stereo_landmarks_.clear();
+  bootstrap_retaining_=false;
   temporal_.clear();
   temporal_ready_ = false;
   depth_maps_.reset();
@@ -145,6 +153,7 @@ bool SolverSfMMultisensor::solveNextFrame(int64_t time_ns, const sof::FrameState
                                           Isometry3T& world_from_rig, Matrix6T& static_info_exp,
                                           const SolverPerFrameSettings& solver_settings, std::vector<Track2D>* tracks2d,
                                           Tracks3DMap* tracks3d) {
+  bootstrap_retaining_=false;
   if (with_imu_) {
     return solveNextFrameInertial(time_ns, frameState, observations, depth_infos, world_from_rig, static_info_exp,
                                   solver_settings, tracks2d, tracks3d);
@@ -168,6 +177,14 @@ bool SolverSfMMultisensor::solveNextFrameVisualOnly(int64_t time_ns, const sof::
     static_info_exp.setZero();
   } else {
     map_.get_recent_landmarks(recent_landmarks_);
+    if (std::getenv("VIO_OBSERVATION_MAP_LOOKUP")) {
+      map::Map<TrackId,Vector3T> observed;
+      map_.get_observed_landmarks(obs_vector_,observed);
+      size_t additional=0;
+      for(const auto& [id,point]:observed){additional+=recent_landmarks_.try_emplace(id,point).second;}
+      TraceMessage("MAP_OBSERVATION_LOOKUP t=%lld obs=%zu added=%zu",(long long)time_ns,obs_vector_.size(),additional);
+    }
+
 
     Isometry3T rig_from_world = prev_rig_from_world_;
     bool res;
@@ -226,12 +243,43 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   auto prep = imu_->prepare_frame(time_ns);
   TraceMessage("VIO_FUSION_STATE t=%lld ready=%d gravity=%d healthy=%d", static_cast<long long>(time_ns), static_cast<int>(prep.imu_state == StateMachine::State::Ok), static_cast<int>(map_.get_gravity().has_value()), static_cast<int>(prep.no_drops));
 
+  if(const char* dir=std::getenv("VIO_MAP_SNAPSHOT_DIR")) {
+    const double seconds=time_ns*1e-9;const char* high=std::getenv("VIO_DIAG_MAX_S");
+    if(!high || seconds<=std::atof(high)) {
+      std::ofstream f(std::string(dir)+"/"+std::to_string(time_ns)+".history");f<<std::setprecision(17);
+      const auto history=map_.get_recent_submap(map_.size(),false);
+      for(size_t i=0;i<history.consecutive_keyframes.size();++i) {
+        const auto& k=history.consecutive_keyframes[i].keyframe;f<<"K "<<k->time_ns();
+        const auto pose=k->get_state().rig_from_w;
+        for(int r=0;r<4;++r)for(int c=0;c<4;++c)f<<' '<<pose.matrix()(r,c);f<<'\n';
+        for(const auto& lo:history.landmark_and_obs[i]) {
+          const auto point=lo.landmark->get_pose();if(!point)continue;
+          for(const auto& o:lo.observations)f<<"O "<<k->time_ns()<<' '<<o.id<<' '<<int(o.cam_id)<<' '<<point->transpose()<<' '<<o.xy.transpose()<<' '<<o.xy_info(0,0)<<' '<<o.xy_info(0,1)<<' '<<o.xy_info(1,1)<<'\n';
+        }
+      }
+      for(const auto& o:obs_vector_)f<<"C "<<o.id<<' '<<int(o.cam_id)<<' '<<o.xy.transpose()<<' '<<o.xy_info(0,0)<<' '<<o.xy_info(0,1)<<' '<<o.xy_info(1,1)<<'\n';
+    }
+  }
   bool pnp_result = false;
   auto& recovery = imu_->recovery_anchor;
   const bool trying_recovery = recovery && prep.no_drops && prep.imu_state == StateMachine::State::Ok;
   if (!map_.empty()) {
     map_.get_recent_landmarks(recent_landmarks_);
+    if (std::getenv("VIO_OBSERVATION_MAP_LOOKUP")) {
+      map::Map<TrackId,Vector3T> observed;
+      map_.get_observed_landmarks(obs_vector_,observed);
+      size_t additional=0;
+      for(const auto& [id,point]:observed){additional+=recent_landmarks_.try_emplace(id,point).second;}
+      TraceMessage("MAP_OBSERVATION_LOOKUP t=%lld obs=%zu added=%zu",(long long)time_ns,obs_vector_.size(),additional);
+    }
 
+
+    if (prep.imu_state != StateMachine::State::Ok && std::getenv("VIO_BOOTSTRAP_STEREO_REFRESH")) {
+      for(const auto& observation:obs_vector_) {
+        auto point=bootstrap_stereo_landmarks_.find(observation.id);
+        if(point!=bootstrap_stereo_landmarks_.end()) recent_landmarks_.try_emplace(point->first,point->second);
+      }
+    }
     if (prep.imu_state == StateMachine::State::Ok) {
       if (trying_recovery) {
         for (const auto& landmark : recovery->landmarks) {
@@ -249,6 +297,77 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
 
   const bool bootstrap = metric_init_enabled_ && !map_.get_gravity() &&
                          std::none_of(depth_infos.begin(),depth_infos.end(),[](auto p){return p!=nullptr;});
+  imu_->set_init_observation_requirement(size_t(std::max(0,solver_settings.imu_pnp.min_observations)));
+  if(!pnp_result&&bootstrap&&!solver_settings.sba.async&&std::getenv("VIO_BOOTSTRAP_RETAIN_MAP")&&imu_->defer_bootstrap_failure(time_ns,solver_settings.sm)) {
+    bootstrap_retaining_=true;bootstrap_refresh_requested_=true;
+    world_from_rig=prev_rig_from_world_.inverse();static_info_exp.setZero();return false;
+  }
+  bootstrap_refresh_requested_=false;
+  if(bootstrap&&pnp_result&&prep.no_drops&&!solver_settings.sba.async&&std::getenv("VIO_BOOTSTRAP_STEREO_REFRESH")) {
+    const Isometry3T accepted=imu_->accepted_working_rig_pose();
+    const Isometry3T rw=accepted.inverse();size_t support=0;
+    for(const auto& observation:obs_vector_) {
+      const auto point=recent_landmarks_.find(observation.id);
+      if(point==recent_landmarks_.end()||observation.cam_id>=rig_.num_cameras){continue;}
+      const Vector3T pc=rig_.camera_from_rig[observation.cam_id]*rw*point->second;
+      if(!pc.allFinite()||pc.z()<=.05f){continue;}
+      const Vector2T error=pc.hnormalized()-observation.xy;Vector2T pixel;
+      if(!frontend_guard::actual_pixel_residual(*rig_.intrinsics[observation.cam_id],pc.hnormalized(),observation.xy,pixel)){continue;}
+      if(frontend_guard::observation_consistent(9.*observation.xy_info.cast<double>(),error.cast<double>(),pixel.cast<double>())){++support;}
+    }
+    const size_t required=std::max(0,solver_settings.imu_pnp.min_observations);
+    bootstrap_refresh_requested_=support<required;
+    TraceMessage("BOOTSTRAP_SUPPORT t=%lld support=%zu required=%zu request=%d",(long long)time_ns,support,required,int(bootstrap_refresh_requested_));
+  }
+  if (std::getenv("VIO_BOOTSTRAP_STEREO_REFRESH") && !bootstrap && prep.no_drops) {
+    size_t mapped=0;
+    for(const auto& observation:obs_vector_) mapped+=recent_landmarks_.count(observation.id);
+    bootstrap_refresh_requested_=!pnp_result || mapped<size_t(std::max(0,solver_settings.imu_pnp.min_observations));
+  }
+  if (std::getenv("VIO_BOOTSTRAP_STEREO_REFRESH")) {
+    // Private bootstrap reservoir: no extra map keyframe, SBA or gravity-init
+    // event. Creation uses an accepted pose; only a later image can use these
+    // points in PnP and must pass the unchanged support/rank checks.
+    if (!bootstrap || !pnp_result || !prep.no_drops || frameState==sof::FrameState::Key) {
+      bootstrap_stereo_landmarks_.clear();
+    } else {
+      std::unordered_set<TrackId> visible;
+      for(const auto& observation:obs_vector_) visible.insert(observation.id);
+      for(auto it=bootstrap_stereo_landmarks_.begin();it!=bootstrap_stereo_landmarks_.end();) {
+        if(!visible.count(it->first)) it=bootstrap_stereo_landmarks_.erase(it); else ++it;
+      }
+      if(bootstrap_refresh_requested_) {
+        MulticamTriangulator triangulator(rig_);
+        const auto points=triangulator.triangulate(imu_->accepted_working_rig_pose(),obs_vector_);
+        size_t added=0;
+        for(const auto& point:points) {
+          if (point.point_w.allFinite() && !recent_landmarks_.count(point.id)) {
+            const bool inserted = bootstrap_stereo_landmarks_.try_emplace(point.id, point.point_w).second;
+            added += inserted;
+            if (inserted) {
+              if (const char* directory = std::getenv("VIO_TRIANGULATION_BIRTH_DIR")) {
+                std::ofstream f(std::string(directory) + "/" + std::to_string(time_ns) + ".reservoir", std::ios::app);
+                f << std::setprecision(17) << "P " << point.id << ' ' << point.point_w.transpose() << '\n';
+                const auto rw = imu_->accepted_working_rig_pose().inverse().matrix();
+                f << "T";
+                for (int r = 0; r < 4; ++r) {
+                  for (int c = 0; c < 4; ++c) { f << ' ' << rw(r,c); }
+                }
+                f << '\n';
+                for (const auto& o : obs_vector_) {
+                  if (o.id == point.id) {
+                    f << "O " << int(o.cam_id) << ' ' << o.xy.transpose() << ' '
+                      << o.xy_info(0,0) << ' ' << o.xy_info(0,1) << ' ' << o.xy_info(1,1) << '\n';
+                  }
+                }
+              }
+            }
+          }
+        }
+        TraceMessage("BOOTSTRAP_STEREO_RESERVOIR t=%lld added=%zu total=%zu",(long long)time_ns,added,bootstrap_stereo_landmarks_.size());
+      }
+    }
+  }
   auto frame = imu_->finalize_frame(pnp_result, prep.no_drops, time_ns, frameState, solver_settings.sm, bootstrap);
   const bool just_initialized = bootstrap && map_.get_gravity().has_value();
   world_from_rig = frame.world_from_rig;
@@ -259,7 +378,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
     imu_->commit_recovery_anchor(time_ns);
   }
   if (!pnp_result && prep.no_drops && imu_->can_seed_recovery() && !solver_settings.sba.async &&
-      frameState == sof::FrameState::Key) {
+      (frameState == sof::FrameState::Key || std::getenv("VIO_BOOTSTRAP_STEREO_REFRESH"))) {
     const auto& predicted_pose = imu_->propagated_pose();
     // Triangulate in the propagated rig pose, not in the last published pose.
     // The hypothesis stays private until later images validate its reprojection.
@@ -372,6 +491,10 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
     // Slots 2,3 are physical cameras 0,1 in the experimental rig [2,3,0,1].
     temporal_.extend(time_ns, rig_, world_from_rig, obs, recent_landmarks_, 12u, temporal_insert_,
                      temporal_strict_ ? 4.f : 2.f, temporal_strict_ ? 1.f : 1.75f, landmarks);
+  }
+  if(const char* dir=std::getenv("VIO_MAP_SNAPSHOT_DIR")) {
+    std::ofstream f(std::string(dir)+"/"+std::to_string(time_ns)+".created");f<<std::setprecision(17);
+    for(const auto& point:landmarks) f<<point.id<<' '<<point.point_w.transpose()<<'\n';
   }
   map_.add_keyframe(time_ns, state, preint, obs, landmarks);
 

@@ -281,3 +281,13 @@ cudaError_t point_to_plane_evaluate(const GPUPlane* planes, int num_planes, int 
                                     cudaStream_t stream);
 
 }  // namespace cuvslam::cuda
+
+namespace cuvslam::cuda {
+// Keep a valid original LK observation only if the SAME NCC threshold holds
+// after accounting for the calibrated patch orientation. Failed checks are
+// privately retried by the calibrated tracker; no VIO acceptance is relaxed.
+cudaError_t calibrated_patch_check(cudaTextureObject_t primary, cudaTextureObject_t secondary,
+                                  Size primary_size, Size secondary_size,
+                                  const TrackData* original, TrackData* calibrated,
+                                  const int* primary_indices, int count, cudaStream_t stream);
+}

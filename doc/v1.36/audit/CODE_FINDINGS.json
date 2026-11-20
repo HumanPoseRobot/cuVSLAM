@@ -1,0 +1,65 @@
+[
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/imu/world_velocity.h",
+    "line": 23,
+    "status": "已核对：实际时间差、世界系平移差",
+    "reason": "调用方先对 int64 纳秒作差，再转换秒；不使用固定 30 Hz 分母。",
+    "excerpt": "// Both transforms are world_from_imu. Orientation must not affect linear velocity.\ninline Vector3T WorldVelocity(const Isometry3T& previous, const Isometry3T& current, float dt_s) {\n  return (current.translation() - previous.translation()) / dt_s;\n}\n}  // namespace cuvslam::sba_imu"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/imu/imu_preintegration.cpp",
+    "line": 84,
+    "status": "已核对：端点覆盖",
+    "reason": "积分覆盖请求起止时间；因果尾段仅保持有限余量；19 组日志积分时长误差最大约 15 ns。",
+    "excerpt": "  }\n  auto sample_at = [&](int64_t time_ns) {\n    auto hi = std::lower_bound(storage.begin(), storage.end(), time_ns,\n                               [](const auto& m, int64_t t) { return m.time_ns < t; });\n    if (hi == storage.end()) {\n      auto m = *last;\n      m.time_ns = time_ns;\n      return m;\n    }\n    if (hi->time_ns == time_ns || hi == storage.begin()) {\n      return *hi;\n    }"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/pipelines/gpu_window/window_backend.cpp",
+    "line": 164,
+    "status": "已确认：鱼眼验收口径不一致",
+    "reason": "地图支持检查仍将归一化残差乘焦距，PnP/前台使用实际鱼眼像素。固定输入有 5–11 个观测判定差异；不能据此声称已解释当前峰值。",
+    "excerpt": "\nbool reprojection_inlier(const camera::Rig& rig, const Isometry3T& rig_from_world,\n                         const camera::Observation& observation, const Vector3T& point) {\n  if (observation.cam_id >= rig.num_cameras) {\n    return false;\n  }\n  const auto camera = observation.cam_id;\n  const Vector3T pc = rig.camera_from_rig[camera] * rig_from_world * point;\n  if (!pc.allFinite() || pc.z() <= .05f) {\n    return false;\n  }\n  const Vector2T error = pc.hnormalized() - observation.xy;"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/pipelines/gpu_window/window_backend.cpp",
+    "line": 79,
+    "status": "已确认：FP64 后验路径为可选",
+    "reason": "默认经过 EvaluateCpu 的 float 行，再转换 double 做后验/边缘化。VIO_WINDOW_FP64_POSTERIOR 未开启；尚未量化其对整段高度的因果影响。",
+    "excerpt": "}\nWinEvaluation evaluate_window(const WinProblem& p, const WinResult& r) {\n  // The optimizer's FP64 path must retain FP64 rows through posterior recovery\n  // and marginalization too. Previously EvaluateCpu rounded every Jacobian and\n  // residual to float before those nominally-double QR operations.\n  if (fp64_window() && std::getenv(\"VIO_WINDOW_FP64_POSTERIOR\")) {\n    std::vector<double> x(15*p.count + 3*p.points.size(),0.);\n    for (int i=0;i<15*p.count;++i) { x[i]=r.x[i]; }\n    for (size_t i=0;i<r.points.size();++i) { x[15*p.count+i]=r.points[i]; }\n    return gpu_window::fp64::EvaluateHost(p,x,true);\n  }\n  const auto legacy=(cpu_window() || fp64_window()) ? EvaluateCpu(p,r) : Evaluate(p,r);"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/pipelines/gpu_window/window_backend.cpp",
+    "line": 376,
+    "status": "已核对：四帧窗口保留三帧",
+    "reason": "满四帧时边缘化最旧帧，保留三帧和先验；下一关键帧重新组成四帧。仅纳入待移除因子，避免把保留的 IMU 因子重复计入先验。",
+    "excerpt": "// map or prior cannot subsequently be committed.\nbool prepare_retained(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig, const Vector3T& gravity,\n                      int iterations, double huber, int64_t t) {\n  if (g.nodes.size() == static_cast<size_t>(window_limit())) {\n    std::vector<TrackId> ids;\n    auto p = pack(g, cal, rig, gravity, iterations, huber, ids);\n    WinResult zero;\n    zero.points.resize(3 * ids.size());\n    auto linear = evaluate_window(p, zero);\n    if (!valid_evaluation(linear)) {\n      TraceMessage(\"WINDOW_TRANSACTION_REJECT t=%lld reason=invalid_marginal_jacobian\", (long long)t);\n      return false;"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/pipelines/gpu_window/window_backend.cpp",
+    "line": 794,
+    "status": "已核对：提交事务",
+    "reason": "提交前验证时间戳、目的关键帧及地图版本；拒绝不提交。1001 次提交无拒绝后回写证据。",
+    "excerpt": "}\nbool WindowBackend::commit(map::UnifiedMap& map, const imu::ImuCalibration& cal, int64_t t) {\n  auto& d = *impl_;\n  if (!d.have_pending) {\n    return true;\n  }\n  if (d.pending.nodes.empty() || d.pending.nodes.back().t != t) {\n    TraceMessage(\"WINDOW_TRANSACTION_REJECT t=%lld reason=commit_timestamp\", (long long)t);\n    discard_pending();\n    return false;\n  }\n  // Validate every destination before the first mutation. The caller must not"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/pipelines/imu_fusion_context.cpp",
+    "line": 879,
+    "status": "已核对：前后台状态对齐",
+    "reason": "提交后检查位姿、速度和偏置一致性。19 组无失败记录，检查中的速度差为 0。",
+    "excerpt": "\nbool ImuFusionContext::on_keyframe_committed(bool lost) {\n  if (window_ && !lost && has_joint_prior_ && !window_->commit(map_, calib_, prev_pose_ts_ns_)) {\n    // Fail closed: a pose whose map transaction failed is not a valid output.\n    window_->reset();\n    has_joint_prior_ = false;\n    guard_exhausted_ = true;\n    TraceMessage(\"FRONTEND_COMMIT_FAILED t=%lld publish=0\", (long long)prev_pose_ts_ns_);\n    return false;\n  }\n  if (joint_active_ && !lost) {\n    const auto recent = map_.get_recent_submap(1);"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/pipelines/imu_fusion_context.cpp",
+    "line": 989,
+    "status": "已核对：世界重力与输出坐标",
+    "reason": "地图保存世界系重力，输出时旋转到当前 rig；头部旋转不改变保存的世界系重力。世界系重力固定不代表初始化方向一定准确。",
+    "excerpt": "\nstd::optional<Vector3T> ImuFusionContext::get_gravity() const {\n  auto gravity = map_.get_gravity();\n  if (!gravity) {\n    return std::nullopt;\n  }\n  Isometry3T rig_from_w = calib_.rig_from_imu() * prev_pose_.w_from_imu.inverse();\n  return rig_from_w.linear() * (*gravity);\n}\n\nbool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {\n  TRACE_EVENT ev = profiler_domain_.trace_event(\"gravity_estimation_callback\");"
+  },
+  {
+    "file": "/nas/shared/baidx/cuvslam_runs/vio_precision_201148_20261120/src/libs/cuvslam/cuvslam2.cpp",
+    "line": 772,
+    "status": "存在微小浮点累积，已量化",
+    "reason": "公共位姿从相对增量再累积；201148 初始化后，逐帧竖直漂移增量最大约 1.60 微米，不支持其为厘米级高度或速度尖峰的直接解释。",
+    "excerpt": "  if (result) {\n    impl->prev_abs_pose = odom::increment_pose(impl->prev_abs_pose, impl->last_delta);\n  } else {\n    return PoseEstimate{};\n  }\n  const Isometry3T internal_pose = impl->prev_abs_pose;\n\n  // static pose covariance in exponential mapping form in WCS\n  const Matrix6T static_pose_covariance_exp = static_info_exp.ldlt().solve(Matrix6T::Identity());\n  // static pose covariance in WCS, ordered as [x, y, z, roll, pitch, yaw]\n  const Matrix6T static_pose_covariance_xyz_rpy =\n      math::PoseCovToXYZRollPitchYawCov(static_pose_covariance_exp, internal_pose);"
+  }
+]

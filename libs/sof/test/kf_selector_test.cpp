@@ -133,4 +133,19 @@ TEST(KFSelector, ForcedNonKeyframeSkipsMaxTimeRule) {
   EXPECT_TRUE(selector.select(current_tracks, kLateTimestampNs, last_kf_tracks, 0, settings));
 }
 
+
+TEST(KFSelector, StereoRefreshDoesNotForceKeyframeOrChangeExplicitOverride) {
+  cuvslam::odom::KeyFrameSettings settings;
+  cuvslam::sof::KFSelector selector(settings);
+  const cuvslam::sof::TracksVector empty;
+  const auto tracks=MakeTracks(50);
+  EXPECT_TRUE(selector.select(tracks,0,empty,0,settings));
+  settings.stereo_refresh_only=true;
+  EXPECT_FALSE(selector.select(tracks,1,tracks,0,settings));
+  settings.override_frame_selection=false;
+  EXPECT_FALSE(selector.select(tracks,2,empty,0,settings));
+  settings.override_frame_selection=true;
+  EXPECT_TRUE(selector.select(tracks,3,tracks,0,settings));
+}
+
 }  // namespace test::sof

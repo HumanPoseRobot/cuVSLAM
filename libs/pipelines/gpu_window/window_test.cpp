@@ -22,6 +22,19 @@
 #include "window_validation.h"
 using namespace gpu_window;
 int main() {
+  for (int count : {2,3,4,6}) {
+    Problem p;p.count=count;p.huber=1.;
+    for (int i=0;i<15*count;++i) { p.W[i*Dim+i]=1.; }
+    p.W[0]=1e-50;
+    const std::vector<double> x(15*count,0.);
+    const auto precise=fp64::EvaluateHost(p,x,true);
+    assert(precise.prior.size()==size_t(15*count));
+    const auto reduced=assemble(p,precise,false);
+    assert(reduced.H(0,0)>0. && std::abs(reduced.H(0,0)/1e-100-1.)<1e-12);
+    assert(std::abs(reduced.H(1,1)-1.)<1e-12);
+    assert(valid_evaluation(precise));
+  }
+
   {
     assert(!float_representable(1e40));
     assert(!float_representable(std::numeric_limits<double>::infinity()));

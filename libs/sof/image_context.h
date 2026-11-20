@@ -39,6 +39,7 @@ namespace cuvslam::sof {
 class ImageContext {
 public:
   ImageContext(const ImageShape& shape, bool use_gpu, bool support_depth);
+  ~ImageContext();
 
   void set_image_meta(const ImageMeta& meta);
   const ImageMeta& get_image_meta() const;
@@ -106,6 +107,10 @@ private:
   cuda::GPUImage8 gpu_mask_;
   std::unique_ptr<cuda::GPUImage8> gpu_mask_source_;
 
+  // A cache flag means work was enqueued, not that another CUDA stream can
+  // read it. Every consumer waits on the producer event before using textures.
+  cudaEvent_t gpu_image_ready_ = nullptr;
+  cudaEvent_t gpu_gradient_ready_ = nullptr;
   bool gpu_image_pyramid_initialized_ = false;
   bool gpu_gradient_pyramid_initialized_ = false;
 

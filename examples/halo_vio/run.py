@@ -62,14 +62,25 @@ def normalize(packs, target):
     return target
 
 
+
+def release_environment():
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('CUVSLAM_', 'PGO_', 'VIO_'))}
+    env.update(BUILD_KIND='release', SLAM_ENABLED='0', VIO_COMPARE_SOLVER='schur_fp64',
+               CUVSLAM_ONLINE_TEMPORAL='1', OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1',
+               VIO_PNP_WEIGHTED='1', VIO_PIXEL_GEOMETRY='1', VIO_VISUAL_GYRO_SEED='1',
+               VIO_BOOTSTRAP_STEREO_REFRESH='1', VIO_BOOTSTRAP_TRANSACTION='1',
+               VIO_INIT_VISUAL_CHECK='enforce', VIO_BOOTSTRAP_RETAIN_MAP='1')
+    return env
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-root', type=Path, required=True)
     parser.add_argument('--output-root', type=Path, required=True)
-    parser.add_argument('--version',action='version',version='runtime_reduced_v1.35')
+    parser.add_argument('--version',action='version',version='runtime_reduced_v1.36')
     parser.add_argument('--time-profile',help='Explicit validated timing profile name from time_profiles.json')
     parser.add_argument('--sequence', help='Recording prefix when data-root contains several recordings')
     parser.add_argument('--check-only', action='store_true')
+    parser.add_argument('--audit', action='store_true', help='Record per-frame solver and state diagnostics')
     parser.add_argument('--camera-time-offsets', type=float, nargs=4, help='Explicit physical cam0..3 offsets; default: YAML')
     parser.add_argument('--imu-timestamp-shift-ms', type=float, default=0.)
     parser.add_argument('--max-frames', type=int, default=0, help='Diagnostic prefix only; default runs the complete recording')
@@ -94,19 +105,20 @@ def main():
         if args.check_only:
             return 0
         prepared = normalize(packs, out/'input')
-        env = {k: v for k, v in os.environ.items() if not k.startswith(('CUVSLAM_', 'PGO_', 'VIO_COMPARE_'))}
-        env.update(BUILD_KIND='release', SLAM_ENABLED='0', VIO_COMPARE_SOLVER='schur_fp64',
-                   CUVSLAM_ONLINE_TEMPORAL='1', OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
+        env = release_environment()
         cmd = [sys.executable, str(Path(__file__).with_name('replay.py')), '--data-root', str(prepared),
-               '--output-root', str(out/'vio'), '--orientation-audit',str(out/'orientation_audit.json'), '--foreground-mask', 'all', '--cam2-rotation-deg', str(rotation),
+               '--output-root', str(out/'vio'), '--orientation-audit',str(out/'orientation_audit.json'), '--foreground-mask', 'none', '--cam2-rotation-deg', str(rotation),
                '--imu-timestamp-shift-ms', str(args.imu_timestamp_shift_ms)]
+        if args.audit:
+            cmd += ['--audit']
         if args.camera_time_offsets is not None:
             cmd += ['--camera-time-offsets', *map(str, args.camera_time_offsets)]
         if args.max_frames:
             cmd += ['--max-frames', str(args.max_frames)]
         (out/'execution.json').write_text(json.dumps(dict(command=cmd, cam2_rotation_deg=rotation,
             camera_time_offset_policy=('profile:'+args.time_profile) if args.time_profile else ('explicit' if args.camera_time_offsets is not None else 'calibration_yaml'),
-            imu_timestamp_shift_ms=args.imu_timestamp_shift_ms, slam_enabled=False), indent=2))
+            imu_timestamp_shift_ms=args.imu_timestamp_shift_ms, slam_enabled=False,
+            foreground_mask='none', extra_spatial_crop=False, active_options={k:v for k,v in env.items() if k.startswith(('CUVSLAM_', 'VIO_'))}), indent=2))
         with (out/'run.log').open('w') as log:
             return subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
     except (OrientationError, ValueError, OSError) as exc:

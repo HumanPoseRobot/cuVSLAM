@@ -131,10 +131,13 @@ public:
              const std::unordered_map<TrackId, Vector3T>& landmarks, const RGBDInfos& depth_infos = {},
              const std::vector<map::Plane>& planes = {}, const std::vector<Vector3T>& depth_points = {},
              const std::optional<InertialPriorInput>& imu_in = std::nullopt,
-             InertialPosteriorOutput* imu_out = nullptr) const;
+             InertialPosteriorOutput* imu_out = nullptr, int visual_loss_mode = 0) const;
 
+  const std::vector<camera::Observation>& last_visual_observations() const { return filtered_obs_; }
+  const std::optional<Isometry3T>& last_visual_trial() const { return last_visual_trial_; }
 private:
   camera::Rig rig_;
+  mutable std::optional<Isometry3T> last_visual_trial_;
   MultisensorSolverSettings settings_;
   mutable cuda::Stream stream_{false};
   mutable cunls::cuBLASHandle cublas_handle_;
@@ -142,6 +145,7 @@ private:
   // Pre-allocated GPU buffers (capacity = kMaxObsPerCamera * num_cameras).
   // Avoids cudaMalloc/cudaFree on every solve() call.
   mutable cuda::GPUArrayPinned<float2> gpu_observation_xy_;
+  mutable cuda::GPUArrayPinned<float4> gpu_sqrt_information_;
   mutable cuda::GPUArrayPinned<float3> d_lm_world_;
   mutable cuda::GPUArrayPinned<cunls::SE3Transform> d_cam_from_rig_;
   mutable cuda::GPUArrayPinned<cunls::SE3Transform> d_pose_;

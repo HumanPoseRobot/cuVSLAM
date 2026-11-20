@@ -96,7 +96,8 @@ inline const char* invalid_problem(const Problem& p) {
   }
   return nullptr;
 }
-inline bool valid_evaluation(const Evaluation& e) {
+template <class EvaluationType>
+inline bool valid_evaluation(const EvaluationType& e) {
   return finite_range(e.edge) && finite_range(e.edge_j) && finite_range(e.visual) && finite_range(e.visual_j) &&
          finite_range(e.prior) && finite_range(e.prior_j);
 }

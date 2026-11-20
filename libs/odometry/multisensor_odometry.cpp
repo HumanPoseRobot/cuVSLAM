@@ -97,12 +97,25 @@ bool MultisensorOdometry::track(const Sources& curr_sources, const DepthSources&
     cam_observations.clear();
   }
 
+  // SOF creates new cross-camera associations only on a keyframe. Request
+  // replenishment BEFORE tracking; a downstream keyframe label cannot create
+  // stereo observations. Respect explicit caller overrides and keep this
+  // bootstrap-only request separate from acceptance of the candidate pose.
+  auto effective_settings = per_frame_setting;
+  if (!effective_settings.kf.override_frame_selection.has_value() && solver_.bootstrap_refresh_requested()) {
+    if (std::getenv("VIO_BOOTSTRAP_STEREO_REFRESH")) {
+      effective_settings.kf.stereo_refresh_only = true;
+    } else {
+      effective_settings.kf.override_frame_selection = true;
+    }
+    TraceMessage("BOOTSTRAP_EARLY_KF t=%lld",(long long)timestamp);
+  }
   bool track_result;
   {
     TRACE_EVENT track_ev = profiler_domain_.trace_event("trackNextFrame");
     track_result =
         feature_tracker_->trackNextFrame(curr_sources, curr_images, prev_images, masks_sources,
-                                         predicted_world_from_rig, observations_, frame_type, per_frame_setting);
+                                         predicted_world_from_rig, observations_, frame_type, effective_settings);
   }
   if (!track_result) {
     reset();

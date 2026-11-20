@@ -7,6 +7,14 @@ inline bool ValidInitRotation(const Matrix3T& r) {
   return r.allFinite() && (r.transpose() * r - Matrix3T::Identity()).norm() < 1e-3f &&
          std::abs(r.determinant() - 1.f) < 1e-3f;
 }
+// A gyro delta needs neither gravity nor accelerometer initialization. Use it
+// only as a local PnP starting rotation; it is not a pseudo measurement or a
+// published prediction. Right multiplication follows the IMU body convention.
+inline bool VisualGyroRotationSeed(const Matrix3T& previous,const Matrix3T& delta,bool healthy,Matrix3T& result) {
+ if(!healthy||!ValidInitRotation(previous)||!ValidInitRotation(delta)){return false;}
+ const Matrix3T predicted=previous*delta;
+ if(!ValidInitRotation(predicted)){return false;}result=predicted;return true;
+}
 inline bool ValidInitInterval(int64_t left, int64_t right, float integrated) {
   const double dt = (right - left) * 1e-9;
   return right > left && std::isfinite(integrated) && integrated > 0 &&

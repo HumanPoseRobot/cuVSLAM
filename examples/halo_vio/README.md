@@ -1,6 +1,6 @@
-# HALO 四目 GPU VIO · runtime_reduced_v1.35
+# HALO 四目 GPU VIO · runtime_reduced_v1.36
 
-发布入口是 `run_vio.sh`。它先在 CPU 上核验 cam2 与**当前提供的标定**之间的几何关系，写出 `orientation_audit.json`，通过后才加载 cuVSLAM 并计算完整 VIO。默认四目、原始分辨率、四路前景掩膜、GPU Schur FP64、四状态窗口，关闭回环和 PGO。
+发布入口是 `run_vio.sh`。它先在 CPU 上核验 cam2 与**当前提供的标定**之间的几何关系，写出 `orientation_audit.json`，通过后才加载 cuVSLAM 并计算完整 VIO。默认四目、原始分辨率、无人体掩膜、无额外空间裁剪、GPU Schur FP64、四状态窗口，关闭回环和 PGO。
 
 ## 使用
 
@@ -49,4 +49,6 @@
 python3 -m unittest discover -s examples/halo_vio -p test_orientation.py -v
 ```
 
-`doc/v1.35/summary.csv` 是本轮 14 组实跑验证的聚合结果，共 22422 帧有效、无失跟；13 组完成重力初始化，短片 152938 未初始化。它们没有真值，不能把起终高度变化当作误差或把点云一致性当作 ATE。构建提交、嵌入版本与从提交重建复验记录保存在发布运行包的 manifest 和验证附件中。
+`doc/v1.36/results/REPORT.html` 包含 19 组最优稳定版本结果（room1–room6 有真值）；`doc/v1.36/audit/REPORT.html` 包含时间、窗口和发布一致性核查。发布基于稳定核心 0c68c5c 的源码快照，重新提交和构建后核心哈希会改变，逐帧验证记录保存在运行包 manifest 中。
+
+已知问题：201148 仍有 3.648 m/s 原始发布位姿速度峰值；room 高度误差未完全解决。Cauchy 导数实验、PnP 多假设实验、实际鱼眼地图验收统一与全 FP64 后验不作为本版本已验证修复。当前默认配置关闭这些实验。四帧是窗口上限，拒绝候选后保留前台结果，不保证每段都能达到满窗。

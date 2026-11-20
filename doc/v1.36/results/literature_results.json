@@ -1,0 +1,82 @@
+{
+  "openvio_paper": {
+    "url": "https://arxiv.org/html/2610.41671v1#S4.T4",
+    "title": "OpenVIO, Table IV and Section IV-A",
+    "mode": "Stereo VIO; loop closure disabled; TUM-VI 512; SE3 position ATE RMSE; median of five runs per room; OpenVIO uses declared small parameter variations; not same-machine reruns",
+    "ate_m": {
+      "OpenVIO": [
+        0.034,
+        0.041,
+        0.064,
+        0.028,
+        0.068,
+        0.049
+      ],
+      "OpenVINS": [
+        0.056,
+        0.088,
+        0.08,
+        0.027,
+        0.096,
+        null
+      ],
+      "Basalt": [
+        0.106,
+        0.076,
+        0.133,
+        0.052,
+        0.18,
+        0.023
+      ]
+    },
+    "missing": "OpenVINS room6: paper reports failed median, NOT zero"
+  },
+  "orbslam3_paper": {
+    "url": "https://arxiv.org/pdf/2007.11898#page=13",
+    "title": "ORB-SLAM3, Table IV",
+    "mode": "Stereo-inertial SLAM; map reuse and loop closure not disabled as in this report; SE3; median of three runs; literature reference only",
+    "ate_m": [
+      0.008,
+      0.012,
+      0.011,
+      0.008,
+      0.01,
+      0.006
+    ]
+  },
+  "tumvi_paper": {
+    "url": "https://arxiv.org/pdf/1804.06120#page=8",
+    "title": "TUM-VI Benchmark, Table IV; RPE Table III",
+    "mode": "Dataset-author evaluation; synchronous OKVIS, non-realtime processing, authors tuned IMU-noise parameters; published experiment, not same-machine rerun; native resolution not assumed identical to present 512 runs",
+    "ate_m": {
+      "OKVIS": [
+        0.06,
+        0.11,
+        0.07,
+        0.03,
+        0.07,
+        0.04
+      ]
+    },
+    "rpe_1s_translation_m": {
+      "OKVIS": [
+        0.013,
+        0.015,
+        0.012,
+        0.012,
+        0.012,
+        0.012
+      ]
+    },
+    "rpe_1s_rotation_deg": {
+      "OKVIS": [
+        0.43,
+        0.62,
+        0.63,
+        0.57,
+        0.47,
+        0.49
+      ]
+    }
+  }
+}

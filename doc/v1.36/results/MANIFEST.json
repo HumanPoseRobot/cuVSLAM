@@ -1,0 +1,41 @@
+{
+  "files": {
+    "REPORT.html": "af9459b29fbc7796dda67e0750dc1ff56e6e9fd564b382a785661847037d4ce3",
+    "VERSION.json": "e9d3fc91e909676276df038fb2e915c6419dc82fa16fd81569f936e433ea071b",
+    "best_metrics.csv": "22b7ff315bd09d16906d196b2b36850dc8bd0d736af08f6d1d60adcb67670f68",
+    "best_metrics.json": "717d4a20af092ae5f03cdedc4c8163aeb0616c4725f2944d6d44d3a1bc30aa72",
+    "halo851_152938.png": "6d40ab71f8e9c87ab3ac8422e5f4dbf3ba22298660d799534f5b5a688b45ef7e",
+    "halo851_154711.png": "695963e624ed0e653b25aec90d60d482b4265d096b920d7e4357636a63585f10",
+    "halo851_155031.png": "98d39da881b449d67c9b17335e0213b53ac1ecbfb970a8546fdb5b4b722f8596",
+    "halo851_155625.png": "e8753e2a01753cb4d2684fb0060bf2a84a43e615c0c8e4481cfc8128ab8e2584",
+    "halo851_155811.png": "17e6ea8e08b23be03acb9b64e4027923b11befac1cd1556477ee9fb197ec01a4",
+    "halo851_170302.png": "3fe8a286b92b13c5c336400f06257bdfd9bd93c895d39a6cba184d031e8197ee",
+    "literature_results.json": "bca06e56cc45f6e57088497c75dcd9ac0a722de04a25ea22dd9731caa73bfa0f",
+    "opensource_comparison.csv": "e3058939de511897a19f0a65ff60920d0151d86049784aeba69398a89a0761cd",
+    "opensource_comparison.json": "932e79897d81dd69303a1e64d1161baf2a3ed8d9998f5ccb19eb5e6b9667cfa7",
+    "room1.png": "d5d0b700648c4b1eb9ad0e43ed8522411f746adfab5c0bfc16d801272e56cdd2",
+    "room2.png": "68a8f453c73a6987875b716df3bd976d1714cb6dcee66edb4bc0dae5f9b33ea3",
+    "room3.png": "f67cdfa2297803a4594048076502d37e0fe3077f1d061159ece5128538a9b351",
+    "room4.png": "35abf0f75b235bedbe27963e630c62c90cb6096d43a8b46a153784d29941d356",
+    "room5.png": "6f30d2ca1d6e7559eb8cbec0c494ff11e8876801120441615e7ba70d07dbb4c1",
+    "room6.png": "7e05a6dfce7bc6ee714e9d30f6574eba9e265e10dde7bd0b877d5caabc4c0721",
+    "run_manifest.json": "963bf704fc9a6bfeca4c144fda693be8207d474f68eedf935da126a552e20be9",
+    "test_162436.png": "31df23071ab46e6f207b7e8a7f4000f75077a037c81a95e0e569b529bde8f84e",
+    "test_180123.png": "ebf534e1432236ceadde22c2545d4aad91cbf014653ff7a1b15e4c7b3f44f305",
+    "trajectories.html": "277ea850cd393133aeece39e756e8094886f4ac9d7911059967415462536a70c",
+    "validation_195610.png": "6b3c708fb29bdd588da85c951525ec1377b910a9cb62bd7e71050f8a14f03c70",
+    "validation_200730.png": "de7df26f3f31bb4261c49673ac9a08d461e40442eb1545d2d068189aad06fadf",
+    "validation_201148.png": "39aa0ecd740e67fd582047fdf7a84dff9ab6f4e031933e2fd8cb20021043109a",
+    "validation_202341.png": "1f74509891b47b22ffc7a8560b1a762378110df0ad6e7ffecd9e3f9436bb3151",
+    "validation_203017.png": "9ced041aafab59391f3620582421e7596e318d0a1003074bbfbff2b8c65b4863"
+  },
+  "version": {
+    "core_sha256": "0c68c5c51a0614d3f7c766bb96603c83871e7473fceca5eda3a77a179ecfc82d",
+    "variant": "best_verified",
+    "selection_policy": "One fixed configuration for all 19, stability before per-sequence accuracy; no per-dataset best-of selection",
+    "sequences": 19,
+    "basalt_full_runs": 6,
+    "loop_closure": false,
+    "mask": false
+  }
+}

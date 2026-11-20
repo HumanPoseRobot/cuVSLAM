@@ -96,7 +96,8 @@ bool MultiSOFBase::trackNextFrame(const Sources& curr_sources, Images& curr_imag
     tracks_vector.export_to_observations_vector(*rig_.intrinsics[cam_id], observations[cam_id]);
   }
 
-  if (is_keyframe(primary_tracks, current_time_ns, kf_settings)) {
+  const bool selected_keyframe = is_keyframe(primary_tracks, current_time_ns, kf_settings);
+  if (selected_keyframe || kf_settings.stereo_refresh_only) {
     TRACE_EVENT ev1 = profiler_domain_.trace_event("prim->sec", profiler_color_);
     // Ensure all mono-stream GPU work (pyramid builds, feature detection) is fully
     // visible before launching stereo tracking on separate streams. Without this,
@@ -125,7 +126,7 @@ bool MultiSOFBase::trackNextFrame(const Sources& curr_sources, Images& curr_imag
     //     return true;
     // }
     GetTrackingResults(observations, masks_sources, curr_images);
-    state = FrameState::Key;
+    state = selected_keyframe ? FrameState::Key : FrameState::None;
   }
   return true;
 }

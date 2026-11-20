@@ -1,0 +1,642 @@
+{
+  "halo851_155031": {
+    "covered_frames": 841,
+    "first_s": 25.4000145,
+    "last_s": 53.5000135,
+    "sum_height_increment_m": -0.007313440696216209,
+    "max_decomposition_error_m": 1.734723475976807e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.004538137822095389,
+        "sum_abs_m": 0.6485986425097013,
+        "max_abs_increment_m": 0.0052655625265128105,
+        "max_time_s": 48.133346
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.0033939720892970406,
+        "sum_abs_m": 0.09615101191242717,
+        "max_abs_increment_m": 0.0010942494225699433,
+        "max_time_s": 47.300013
+      },
+      "window_correction": {
+        "sum_signed_m": 0.0006129315328318665,
+        "sum_abs_m": 0.0006129315328318665,
+        "max_abs_increment_m": 0.00044876772614373383,
+        "max_time_s": 31.933349000000003
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 25.4000145
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 5.73768234448696e-06,
+        "sum_abs_m": 0.0001290175585145347,
+        "max_abs_increment_m": 2.1143089019743312e-06,
+        "max_time_s": 47.300013
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "halo851_155811": {
+    "covered_frames": 271,
+    "first_s": 7.200001500000001,
+    "last_s": 16.3333215,
+    "sum_height_increment_m": 0.15513534410764043,
+    "max_decomposition_error_m": 3.469446951953614e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": 0.1484872748383218,
+        "sum_abs_m": 1.1638405761989974,
+        "max_abs_increment_m": 0.01635954981736549,
+        "max_time_s": 9.0666905
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.014372433708928505,
+        "sum_abs_m": 0.14145780799465643,
+        "max_abs_increment_m": 0.006352341518381922,
+        "max_time_s": 7.200001500000001
+      },
+      "window_correction": {
+        "sum_signed_m": -0.007725842837900001,
+        "sum_abs_m": 0.007725842837900001,
+        "max_abs_increment_m": 0.0072803115607621505,
+        "max_time_s": 13.3000045
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 7.200001500000001
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 1.4783982901976234e-06,
+        "sum_abs_m": 7.107684596854875e-06,
+        "max_abs_increment_m": 7.612118707108275e-08,
+        "max_time_s": 12.4666785
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "halo851_170302": {
+    "covered_frames": 4758,
+    "first_s": 54.9000215,
+    "last_s": 215.66667950000001,
+    "sum_height_increment_m": 0.0842527096740698,
+    "max_decomposition_error_m": 3.469446951953614e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": 0.13163958234265416,
+        "sum_abs_m": 3.0436473086409093,
+        "max_abs_increment_m": 0.010146952114687115,
+        "max_time_s": 105.86668350000001
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.039108819229682415,
+        "sum_abs_m": 0.6997965417645692,
+        "max_abs_increment_m": 0.002675282932017634,
+        "max_time_s": 105.86668350000001
+      },
+      "window_correction": {
+        "sum_signed_m": -0.008592382049463209,
+        "sum_abs_m": 0.02454895054744973,
+        "max_abs_increment_m": 0.0049369721690182816,
+        "max_time_s": 56.566729
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 54.9000215
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 0.0003143286105611778,
+        "sum_abs_m": 0.0011953964192590973,
+        "max_abs_increment_m": 3.3316339262628263e-06,
+        "max_time_s": 193.2666715
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "room1": {
+    "covered_frames": 2322,
+    "first_s": 24.651045930000002,
+    "last_s": 141.004463474,
+    "sum_height_increment_m": -0.39495751807553325,
+    "max_decomposition_error_m": 2.7755575615628914e-17,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.444551889477782,
+        "sum_abs_m": 40.17850145153818,
+        "max_abs_increment_m": 0.10019729765985018,
+        "max_time_s": 105.853665457
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.006434127024142465,
+        "sum_abs_m": 0.724296398017581,
+        "max_abs_increment_m": 0.005181639456913177,
+        "max_time_s": 69.30227272
+      },
+      "window_correction": {
+        "sum_signed_m": 0.043161993540339845,
+        "sum_abs_m": 0.5374921971050775,
+        "max_abs_increment_m": 0.014173023444994196,
+        "max_time_s": 66.652967351
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 24.651045930000002
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": -1.7491622348003823e-06,
+        "sum_abs_m": 0.0002048923910510139,
+        "max_abs_increment_m": 4.1928910296303545e-07,
+        "max_time_s": 111.90415193000001
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "room2": {
+    "covered_frames": 2380,
+    "first_s": 24.601237193000003,
+    "last_s": 144.054327316,
+    "sum_height_increment_m": -0.25361418387946877,
+    "max_decomposition_error_m": 6.938893903907228e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.26372303970323063,
+        "sum_abs_m": 14.595694684505073,
+        "max_abs_increment_m": 0.062326971640091884,
+        "max_time_s": 134.90566687700002
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.014094514035856352,
+        "sum_abs_m": 0.5714171892991389,
+        "max_abs_increment_m": 0.007225941303542649,
+        "max_time_s": 140.004138439
+      },
+      "window_correction": {
+        "sum_signed_m": 0.024204273692076176,
+        "sum_abs_m": 0.3375514371671389,
+        "max_abs_increment_m": 0.00864193018012357,
+        "max_time_s": 138.853961386
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 24.601237193000003
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": -9.038324578034132e-07,
+        "sum_abs_m": 0.00013660706161145253,
+        "max_abs_increment_m": 2.3692539736112783e-07,
+        "max_time_s": 138.255236913
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "room3": {
+    "covered_frames": 2297,
+    "first_s": 25.951000123,
+    "last_s": 141.004846912,
+    "sum_height_increment_m": -0.18370374591352334,
+    "max_decomposition_error_m": 6.938893903907228e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.213971576478583,
+        "sum_abs_m": 10.74996378852391,
+        "max_abs_increment_m": 0.034646569480792415,
+        "max_time_s": 123.80517475500001
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.010238569045744885,
+        "sum_abs_m": 0.469002832263107,
+        "max_abs_increment_m": 0.004573887315148291,
+        "max_time_s": 128.90405882500002
+      },
+      "window_correction": {
+        "sum_signed_m": 0.040512435426320687,
+        "sum_abs_m": 0.24402935061550973,
+        "max_abs_increment_m": 0.008296268246668468,
+        "max_time_s": 51.80180819300001
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 25.951000123
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": -6.035815516211214e-06,
+        "sum_abs_m": 0.0002523329394289767,
+        "max_abs_increment_m": 3.427182508622999e-07,
+        "max_time_s": 100.353490737
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "room4": {
+    "covered_frames": 1790,
+    "first_s": 21.651038877,
+    "last_s": 111.303672175,
+    "sum_height_increment_m": -0.39442784804816744,
+    "max_decomposition_error_m": 1.3877787807814457e-17,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.44546124815319416,
+        "sum_abs_m": 28.76789053119406,
+        "max_abs_increment_m": 0.062081789280968185,
+        "max_time_s": 98.702899316
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.026871885224571984,
+        "sum_abs_m": 0.5555361783777246,
+        "max_abs_increment_m": 0.006543879011298044,
+        "max_time_s": 104.753940649
+      },
+      "window_correction": {
+        "sum_signed_m": 0.024163829666607593,
+        "sum_abs_m": 0.2669353512257129,
+        "max_abs_increment_m": 0.01881997497611428,
+        "max_time_s": 104.753940649
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 21.651038877
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": -2.3147861533759428e-06,
+        "sum_abs_m": 8.391179300186994e-05,
+        "max_abs_increment_m": 2.1122179900621727e-07,
+        "max_time_s": 79.153695737
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "room5": {
+    "covered_frames": 2379,
+    "first_s": 22.951230351000003,
+    "last_s": 142.254634263,
+    "sum_height_increment_m": -0.23588424494575766,
+    "max_decomposition_error_m": 1.3877787807814457e-17,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.3494175430735631,
+        "sum_abs_m": 46.379063596420096,
+        "max_abs_increment_m": 0.06880024976513954,
+        "max_time_s": 124.254598509
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.021713287760654322,
+        "sum_abs_m": 0.8254225959527701,
+        "max_abs_increment_m": 0.00471245032858118,
+        "max_time_s": 128.904425053
+      },
+      "window_correction": {
+        "sum_signed_m": 0.13524494249846253,
+        "sum_abs_m": 0.37236609110058366,
+        "max_abs_increment_m": 0.011543563444800854,
+        "max_time_s": 46.852116281
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 22.951230351000003
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 1.6433899966937483e-06,
+        "sum_abs_m": 0.0001718003651737709,
+        "max_abs_increment_m": 3.707857616984409e-07,
+        "max_time_s": 106.95358200000001
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "room6": {
+    "covered_frames": 1959,
+    "first_s": 33.651299719,
+    "last_s": 131.754140579,
+    "sum_height_increment_m": -0.040506932782273984,
+    "max_decomposition_error_m": 3.469446951953614e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.03750203505640649,
+        "sum_abs_m": 9.865540811496231,
+        "max_abs_increment_m": 0.025057779728451395,
+        "max_time_s": 120.353677421
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.0015531538125600694,
+        "sum_abs_m": 0.3768879509061362,
+        "max_abs_increment_m": 0.0019768386569476164,
+        "max_time_s": 56.052167842
+      },
+      "window_correction": {
+        "sum_signed_m": -0.004558649934821052,
+        "sum_abs_m": 0.16310956765928544,
+        "max_abs_increment_m": 0.010886914009912655,
+        "max_time_s": 64.303326684
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 33.651299719
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 5.983963932178666e-07,
+        "sum_abs_m": 7.345277016334994e-05,
+        "max_abs_increment_m": 1.6698466749668442e-07,
+        "max_time_s": 73.552654351
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "test_162436": {
+    "covered_frames": 946,
+    "first_s": 19.599995500000002,
+    "last_s": 59.899996,
+    "sum_height_increment_m": 0.42768862128506,
+    "max_decomposition_error_m": 6.938893903907228e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": 0.32430940164096195,
+        "sum_abs_m": 4.3250497627439435,
+        "max_abs_increment_m": 0.03692586982491225,
+        "max_time_s": 38.399996
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.10636274142848913,
+        "sum_abs_m": 0.5127615929770577,
+        "max_abs_increment_m": 0.015314545005373228,
+        "max_time_s": 21.6666715
+      },
+      "window_correction": {
+        "sum_signed_m": -0.0029796844829704356,
+        "sum_abs_m": 0.007988285703103781,
+        "max_abs_increment_m": 0.002382165348884668,
+        "max_time_s": 34.333345
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 19.599995500000002
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": -3.8373014201642e-06,
+        "sum_abs_m": 3.330343488681915e-05,
+        "max_abs_increment_m": 2.970912129029934e-07,
+        "max_time_s": 38.799984
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "test_180123": {
+    "covered_frames": 1183,
+    "first_s": 14.9,
+    "last_s": 54.766666,
+    "sum_height_increment_m": 0.19718807235947022,
+    "max_decomposition_error_m": 3.469446951953614e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": 0.18664311936256267,
+        "sum_abs_m": 3.241989352742013,
+        "max_abs_increment_m": 0.02863117852081915,
+        "max_time_s": 18.533333000000002
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.016241506025139893,
+        "sum_abs_m": 0.27793465409755835,
+        "max_abs_increment_m": 0.002864046232762839,
+        "max_time_s": 16.599990000000002
+      },
+      "window_correction": {
+        "sum_signed_m": -0.005704647660437689,
+        "sum_abs_m": 0.013412122342763174,
+        "max_abs_increment_m": 0.005256660903567886,
+        "max_time_s": 29.133325000000003
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 14.9
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 8.094632205327967e-06,
+        "sum_abs_m": 0.00014140877967896184,
+        "max_abs_increment_m": 6.196201152042354e-07,
+        "max_time_s": 47.866667500000005
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "validation_195610": {
+    "covered_frames": 903,
+    "first_s": 8.9666855,
+    "last_s": 39.133334500000004,
+    "sum_height_increment_m": 0.07537930578269324,
+    "max_decomposition_error_m": 6.938893903907228e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": 0.036137825317548014,
+        "sum_abs_m": 4.119263323550531,
+        "max_abs_increment_m": 0.03221013916416807,
+        "max_time_s": 31.066679
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.03861631605958086,
+        "sum_abs_m": 0.36756036219280536,
+        "max_abs_increment_m": 0.0035299731478226656,
+        "max_time_s": 30.800011500000004
+      },
+      "window_correction": {
+        "sum_signed_m": 0.000617130301907429,
+        "sum_abs_m": 0.0026787899445029828,
+        "max_abs_increment_m": 0.001647960123205206,
+        "max_time_s": 15.700010500000001
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 8.9666855
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 8.03410365717007e-06,
+        "sum_abs_m": 8.324479679134329e-05,
+        "max_abs_increment_m": 5.856726749464797e-07,
+        "max_time_s": 23.100030500000003
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "validation_200730": {
+    "covered_frames": 560,
+    "first_s": 8.033329,
+    "last_s": 26.666651,
+    "sum_height_increment_m": -0.44654274263862603,
+    "max_decomposition_error_m": 3.469446951953614e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.44921177237267473,
+        "sum_abs_m": 0.8240842428506502,
+        "max_abs_increment_m": 0.028078850258335897,
+        "max_time_s": 8.3999985
+      },
+      "foreground_correction": {
+        "sum_signed_m": 0.00266797708935289,
+        "sum_abs_m": 0.08667023986197593,
+        "max_abs_increment_m": 0.001972202504604291,
+        "max_time_s": 9.166669500000001
+      },
+      "window_correction": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 8.033329
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 8.033329
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 1.0526446956756396e-06,
+        "sum_abs_m": 7.085477503177653e-05,
+        "max_abs_increment_m": 4.194619868982292e-07,
+        "max_time_s": 10.533318000000001
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "validation_201148": {
+    "covered_frames": 1037,
+    "first_s": 51.86668400000001,
+    "last_s": 86.5666685,
+    "sum_height_increment_m": -0.0006000095734476469,
+    "max_decomposition_error_m": 3.469446951953614e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": 0.18057959100267393,
+        "sum_abs_m": 1.912707618213016,
+        "max_abs_increment_m": 0.019126334304992026,
+        "max_time_s": 65.9333525
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.18230915839501577,
+        "sum_abs_m": 0.28525284076483215,
+        "max_abs_increment_m": 0.001874765264349878,
+        "max_time_s": 68.2666805
+      },
+      "window_correction": {
+        "sum_signed_m": 0.0011000941008817342,
+        "sum_abs_m": 0.0011000941008817342,
+        "max_abs_increment_m": 0.0011000941008817342,
+        "max_time_s": 65.900014
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 51.86668400000001
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 2.9463718013086357e-05,
+        "sum_abs_m": 0.00021358967366469467,
+        "max_abs_increment_m": 1.597002605722261e-06,
+        "max_time_s": 71.2333605
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "validation_202341": {
+    "covered_frames": 803,
+    "first_s": 15.333347000000002,
+    "last_s": 42.200014,
+    "sum_height_increment_m": -0.26699791025736097,
+    "max_decomposition_error_m": 3.469446951953614e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.25230551235239396,
+        "sum_abs_m": 1.4306330869903068,
+        "max_abs_increment_m": 0.02252142095202086,
+        "max_time_s": 24.133353500000002
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.01392935679251836,
+        "sum_abs_m": 0.19888908635422572,
+        "max_abs_increment_m": 0.004458827244481416,
+        "max_time_s": 18.400011000000003
+      },
+      "window_correction": {
+        "sum_signed_m": -0.0007616962693305989,
+        "sum_abs_m": 0.0007616962693305989,
+        "max_abs_increment_m": 0.0004140139727347616,
+        "max_time_s": 36.5666825
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 15.333347000000002
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": -1.3448431183339776e-06,
+        "sum_abs_m": 7.843324662876576e-05,
+        "max_abs_increment_m": 5.064378305599516e-07,
+        "max_time_s": 16.833349000000002
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  },
+  "validation_203017": {
+    "covered_frames": 418,
+    "first_s": 28.3000025,
+    "last_s": 42.200011,
+    "sum_height_increment_m": -0.007722933785386794,
+    "max_decomposition_error_m": 2.6020852139652106e-18,
+    "stages": {
+      "prediction": {
+        "sum_signed_m": -0.004120891527697571,
+        "sum_abs_m": 0.4992132433164281,
+        "max_abs_increment_m": 0.007110942607135238,
+        "max_time_s": 30.033349
+      },
+      "foreground_correction": {
+        "sum_signed_m": -0.0005650815586917364,
+        "sum_abs_m": 0.09273008811586188,
+        "max_abs_increment_m": 0.004249644177582747,
+        "max_time_s": 28.500014
+      },
+      "window_correction": {
+        "sum_signed_m": -0.0030483162729064723,
+        "sum_abs_m": 0.006549971004396674,
+        "max_abs_increment_m": 0.004799143638651573,
+        "max_time_s": 29.6666835
+      },
+      "internal_vs_candidate": {
+        "sum_signed_m": 0.0,
+        "sum_abs_m": 0.0,
+        "max_abs_increment_m": 0.0,
+        "max_time_s": 28.3000025
+      },
+      "public_accumulation_drift_increment": {
+        "sum_signed_m": 1.1355573909000312e-05,
+        "sum_abs_m": 5.407327123976694e-05,
+        "max_abs_increment_m": 5.217836928959138e-07,
+        "max_time_s": 40.500014500000006
+      }
+    },
+    "note": "Diagnostic additive published-step decomposition, not independent causal attribution. Rig->IMU lever arm applied. Prediction referenced to previous INTERNAL state. Public/internal offset is differenced, never summed as independent frame corrections. Only complete logged frames included."
+  }
+}

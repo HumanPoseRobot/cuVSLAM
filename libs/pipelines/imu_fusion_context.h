@@ -147,6 +147,9 @@ public:
   bool validate_recovery_seed(const map::Map<TrackId, Vector3T>& points,
                               const std::vector<camera::Observation>& observations,
                               int required, int64_t time_ns) const;
+  void set_init_observation_requirement(size_t required) { init_observation_requirement_=required; }
+  bool defer_bootstrap_failure(int64_t time_ns,const StateMachineSettings& settings);
+  Isometry3T accepted_working_rig_pose() const { return curr_pose_.w_from_imu * calib_.rig_from_imu().inverse(); }
   Vector3T velocity() const { return prev_pose_.velocity; }
   Vector3T gyro_bias() const { return prev_pose_.gyro_bias; }
   Vector3T acc_bias() const { return prev_pose_.acc_bias; }
@@ -172,12 +175,23 @@ private:
   StateMachine sm_;
 
   std::shared_ptr<sba_imu::WindowBackend> window_;
+  struct InitVisualWitness {
+    int64_t time_ns; Isometry3T world_from_rig;
+    std::unordered_map<TrackId,Vector3T> points;
+    std::vector<camera::Observation> observations;
+  };
+  std::optional<InitVisualWitness> init_visual_witness_;
+  // Extra initialization admission applies only to a bootstrap whose history
+  // was changed by fallback/recovery. Never perturb the ordinary good path.
+  bool bootstrap_recovered_=false;
+  size_t init_observation_requirement_=0;
   bool guard_prediction_only_ = false, guard_exhausted_ = false, guard_internal_prediction_ = false;
   double guard_rejected_s_ = 0;
   bool joint_enabled_ = false;
   bool joint_active_ = false;
   bool has_joint_prior_ = false;
   bool metric_bootstrap_ = false;
+  bool visual_interval_healthy_ = false;
   bool enable_imu_sba_init_ = true;
   bool is_first_run_ = true;
   bool integrated_ = false;

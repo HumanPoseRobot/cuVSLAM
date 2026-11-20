@@ -160,7 +160,7 @@ def main():
         raw=(pack/f"imu_{pack.name}.bin").read_bytes()
         assert raw[:8]==b"RKIMU002" and int.from_bytes(raw[12:16],"little")==152
         chunks.append(np.frombuffer(raw,dtype=dtype,offset=72))
-    imu=np.concatenate(chunks);imu["t"]+=round(args.imu_timestamp_shift_ms*1e6);imu=imu[np.linalg.norm(imu["acc"],axis=1)>1]
+    imu=np.concatenate(chunks);imu["t"]+=round(args.imu_timestamp_shift_ms*1e6);raw_imu_count=len(imu); imu=imu[np.isfinite(imu["acc"]).all(axis=1)&np.isfinite(imu["gyro"]).all(axis=1)]; finite_imu_count=len(imu)
     assert np.all(np.diff(imu["t"])>0)
     frames=frames[(targets[frames]>=imu["t"][0])&(targets[frames]<=imu["t"][-1])]
     if len(frames)==0:
@@ -234,6 +234,7 @@ def main():
         return last_image[cam]
 
     digest = hashlib.sha256()
+    imu_digest = hashlib.sha256()
     trajectory, diagnostics = [], []
     frame_hashes=[]
     started=time.monotonic()
@@ -246,15 +247,17 @@ def main():
         images, masks = [], []
         for cam in CAMERA_ORDER:
             nearest = int(np.argmin(abs(timestamps[cam] - stamp)))
-            image,mask=read_frame(cam,nearest),native[cam][1]
+            image=read_frame(cam,nearest)
+            mask=np.zeros_like(image)
             if image.shape!=mask.shape:
                 raise ValueError(f"Camera {cam} has inconsistent native data and mask")
             if frame == frames[0]:
                 cv2.imwrite(str(out/f"mask_cam{cam}.png"),mask)
             images.append(image)
-            masks.append(mask)
+            # No explicit masks are passed to Track.
         while imu_index<len(imu) and int(imu["t"][imu_index])<=stamp:
             row=imu[imu_index]
+            imu_digest.update(np.asarray([int(row["t"])-epoch],dtype="<i8").tobytes()); imu_digest.update(np.asarray(row["acc"],dtype="<f8").tobytes()); imu_digest.update(np.asarray(row["gyro"]-bias,dtype="<f8").tobytes())
             tracker.register_imu_measurement(0,v.ImuMeasurement(timestamp_ns=int(row["t"])-epoch,linear_accelerations=row["acc"],angular_velocities=row["gyro"]-bias))
             imu_index+=1
         digest.update(np.int64(stamp).tobytes())
@@ -262,7 +265,7 @@ def main():
             digest.update(array.tobytes())
         frame_hashes.append(digest.hexdigest())
         start_track = time.perf_counter()
-        estimate, corrected = tracker.track(stamp-epoch, images, masks=masks)
+        estimate, corrected = tracker.track(stamp-epoch, images)
         publish_ms = (time.perf_counter() - start_track) * 1000.
         if frame==frames[0]:
             (out/"native_input_audit.json").write_text(json.dumps(dict(
@@ -318,7 +321,7 @@ def main():
         writer.writerow(["frame", "keyframe", "warming_up", "track_to_pose_ms", *(f"observations_cam{i}" for i in CAMERA_ORDER)])
         writer.writerows(diagnostics)
     (out/"configs.json").write_text(json.dumps(dict(camera_order=CAMERA_ORDER, camera_time_offsets_s=args.camera_time_offsets,
-        foreground_mask=args.foreground_mask,time_origin_unix_ns=epoch,rig_reference="physical_camera_2",visual_up_axis=[0,-1,0], imu_count=1,imu_registered=imu_index,gyro_image_warp=False,hash_format="frame timestamp, images, masks ONLY; IMU is registered but excluded from image hash", input_sha256=digest.hexdigest(), expert_parameters=expert), indent=2))
+        imu_input_policy="finite_values_no_magnitude_filter",raw_imu_records=raw_imu_count,finite_imu_records=finite_imu_count,input_imu_sha256=imu_digest.hexdigest(),foreground_mask="none_at_track",extra_spatial_crop=False,time_origin_unix_ns=epoch,rig_reference="physical_camera_2",visual_up_axis=[0,-1,0], imu_count=1,imu_registered=imu_index,gyro_image_warp=False,hash_format="frame timestamp and images ONLY; no mask input; IMU registered separately", input_sha256=digest.hexdigest(), expert_parameters=expert), indent=2))
 
 
 if __name__ == "__main__":

@@ -344,3 +344,52 @@ TEST(Cuda, DISABLED_STTrackerSpeedupPartialmap) {
 }
 
 }  // namespace test
+
+TEST(Cuda, CalibratedNccPreservesValidLkAndRejectsIncorrectPatchOrientation) {
+  using namespace cuvslam;
+  constexpr int width = 128, height = 128;
+  ImageMatrixT image(height, width), rotated(height, width);
+  std::mt19937 random(3104);
+  std::uniform_real_distribution<float> value(0.f, 255.f);
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      image(y, x) = value(random);
+    }
+  }
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      rotated(y, x) = image(height - 1 - y, width - 1 - x);
+    }
+  }
+  cuda::GPUImageT a(image), b(rotated);
+  cuda::GPUArrayPinned<cuda::TrackData> original(1), trial(1);
+  cuda::GPUArrayPinned<int> indices(1);
+  indices[0] = 0;
+  cuda::Stream stream;
+  original[0].track = {width - 33.5f, height - 55.5f};
+  original[0].track_status = true;
+  original[0].ncc_threshold = .8f;
+  trial[0].track = {33.5f, 55.5f};
+  trial[0].initial_guess_map = {-1, 0, 0, -1};
+  trial[0].search_radius_px = 30.f;
+  original.copy(cuda::ToGPU, stream.get_stream());
+  trial.copy(cuda::ToGPU, stream.get_stream());
+  indices.copy(cuda::ToGPU, stream.get_stream());
+  CUDA_CHECK(cuda::calibrated_patch_check(a.get_texture_filter_linear(), b.get_texture_filter_linear(), {width, height},
+                                          {width, height}, original.ptr(), trial.ptr(), indices.ptr(), 1,
+                                          stream.get_stream()));
+  trial.copy(cuda::ToCPU, stream.get_stream());
+  CUDA_CHECK(cudaStreamSynchronize(stream.get_stream()));
+  EXPECT_EQ(trial[0].cache_index, -2);
+  EXPECT_GT(trial[0].ncc, .999f);
+  trial[0].initial_guess_map = {1, 0, 0, 1};
+  trial[0].search_radius_px = 30.f;
+  trial.copy(cuda::ToGPU, stream.get_stream());
+  CUDA_CHECK(cuda::calibrated_patch_check(a.get_texture_filter_linear(), b.get_texture_filter_linear(), {width, height},
+                                          {width, height}, original.ptr(), trial.ptr(), indices.ptr(), 1,
+                                          stream.get_stream()));
+  trial.copy(cuda::ToCPU, stream.get_stream());
+  CUDA_CHECK(cudaStreamSynchronize(stream.get_stream()));
+  EXPECT_EQ(trial[0].cache_index, -1);
+  EXPECT_LT(trial[0].ncc, .8f);
+}

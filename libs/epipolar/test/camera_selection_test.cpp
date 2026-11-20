@@ -40,7 +40,14 @@ Vector3TVector GeneratePointsInFrontOfBothCameras(const Isometry3T& camera2, siz
   Isometry3T toLocalCamera2Space = camera2.inverse();
 
   // Generate some points that we know will be in front of both cameras (+Z forward, OpenCV).
-  Vector3TVector points3D = GeneratePointsInCube(numPoints, Vector3T(3.0, 3.0, 4.0), Vector3T(8.0, 8.0, 14.0));
+  // This test counts cheiral, triangulatable points, not points almost on the
+  // camera baseline. The old random cube occasionally produced a parallel ray
+  // pair, correctly rejected by production code but wrongly expected here.
+  Vector3TVector points3D;
+  points3D.reserve(numPoints);
+  for (size_t i = 0; i < numPoints; ++i) {
+    points3D.emplace_back(4.f + .2f * float(i % 10), 3.f + .15f * float(i / 10), 8.f + .05f * float(i % 3));
+  }
 
   std::for_each(points3D.cbegin(), points3D.cend(), [&toLocalCamera2Space](const Vector3T& point3D) {
     Vector3T point3DInCamera2Space = toLocalCamera2Space * point3D;
@@ -185,3 +192,11 @@ TEST_F(CameraSelectionTest, CountPointsInFrontOfCameras_MixedPointsInFrontAndBeh
 }
 
 }  // namespace test::epipolar
+
+TEST(CameraSelectionDegeneracy, ParallelRaysAreNotInventedAsFrontFacingPoints) {
+  using namespace cuvslam;
+  Isometry3T camera = Isometry3T::Identity();
+  camera.translation().x() = .1f;
+  Vector3T point;
+  EXPECT_FALSE(epipolar::IntersectRaysInReferenceSpace(camera, Vector3T::UnitZ(), Vector3T::UnitZ(), point));
+}

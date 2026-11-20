@@ -42,6 +42,8 @@ struct KeyFrameSettings {
 
   // Explicit per-frame keyframe decision. std::nullopt uses automatic keyframe checks.
   std::optional<bool> override_frame_selection;
+  // Request fresh cross-camera associations without changing keyframe timing.
+  bool stereo_refresh_only = false;
 };
 
 // Bundles all per-frame setting overrides into a single struct

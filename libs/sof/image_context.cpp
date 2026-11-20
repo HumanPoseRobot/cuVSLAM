@@ -41,6 +41,17 @@ ImageContext::ImageContext(const ImageShape& shape, bool use_gpu, bool support_d
   }
 }
 
+ImageContext::~ImageContext() {
+#ifdef USE_CUDA
+  if (gpu_gradient_ready_) {
+    cudaEventDestroy(gpu_gradient_ready_);
+  }
+  if (gpu_image_ready_) {
+    cudaEventDestroy(gpu_image_ready_);
+  }
+#endif
+}
+
 void ImageContext::set_image_meta(const ImageMeta& meta) {
   std::lock_guard<std::mutex> guard(mutex_);
   meta_ = meta;
@@ -205,6 +216,7 @@ const cuda::GPUImageT& ImageContext::gpu_image() const { return gpu_image_; }
 bool ImageContext::build_gpu_image_pyramid(const ImageSource& source, bool blur_filter, cudaStream_t s) {
   std::lock_guard<std::mutex> guard(mutex_);
   if (gpu_image_pyramid_initialized_) {
+    CUDA_CHECK(cudaStreamWaitEvent(s, gpu_image_ready_, 0));
     return true;
   }
   if (source.data == nullptr) {
@@ -225,20 +237,33 @@ bool ImageContext::build_gpu_image_pyramid(const ImageSource& source, bool blur_
     }
   }
   gpu_image_pyramid_.build(gpu_image_, blur_filter, s);
+  if (!gpu_image_ready_) {
+    CUDA_CHECK(cudaEventCreateWithFlags(&gpu_image_ready_, cudaEventDisableTiming));
+  }
+  CUDA_CHECK(cudaEventRecord(gpu_image_ready_, s));
   gpu_image_pyramid_initialized_ = true;
   return true;
 }
 
-bool ImageContext::build_gpu_gradient_pyramid(bool horizontal, cudaStream_t s) {
+bool ImageContext::build_gpu_gradient_pyramid(bool /*horizontal*/, cudaStream_t s) {
   std::lock_guard<std::mutex> guard(mutex_);
   if (gpu_gradient_pyramid_initialized_) {
+    CUDA_CHECK(cudaStreamWaitEvent(s, gpu_gradient_ready_, 0));
     return true;
   }
   if (!gpu_image_pyramid_initialized_) {
     return false;
   }
-  bool res = gpu_gradient_pyramid_.set(gpu_image_pyramid_, s, horizontal);
+  CUDA_CHECK(cudaStreamWaitEvent(s, gpu_image_ready_, 0));
+  // The same image may serve LK and affine matching during one frame. Cache
+  // complete XY gradients once; a preceding X-only request must not leave Y
+  // uninitialized or require overwriting X while another stream reads it.
+  bool res = gpu_gradient_pyramid_.set(gpu_image_pyramid_, s, false);
   if (res) {
+    if (!gpu_gradient_ready_) {
+      CUDA_CHECK(cudaEventCreateWithFlags(&gpu_gradient_ready_, cudaEventDisableTiming));
+    }
+    CUDA_CHECK(cudaEventRecord(gpu_gradient_ready_, s));
     gpu_gradient_pyramid_initialized_ = true;
   }
   return res;

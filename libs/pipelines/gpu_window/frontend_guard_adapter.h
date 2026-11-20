@@ -3,9 +3,26 @@
 #include "camera/observation.h"
 #include "imu/imu_sba_problem.h"
 #include "common/log.h"
+#include <cstdlib>
 #include <set>
 #include <string>
 namespace cuvslam::pipelines::frontend_guard {
+// Measure the residual in the actual raster, not a virtual pinhole image.
+// The whitened residual still uses xy_info, which already includes the local
+// inverse-camera Jacobian. This conversion is only for pixel support and extent.
+inline bool actual_pixel_residual(const camera::ICameraModel& camera,const Vector2T& predicted,
+                                  const Vector2T& observed,Vector2T& error,Vector2T* measured=nullptr) {
+ Vector2T p,o;
+ if(!camera.denormalizePoint(predicted,p)||!camera.denormalizePoint(observed,o)){return false;}
+ error=p-o;if(measured){*measured=o;}return error.allFinite();
+}
+inline bool guard_pixel_residual(const camera::ICameraModel& camera,const Vector2T& predicted,
+                                 const Vector2T& observed,Vector2T& error,Vector2T* measured=nullptr) {
+ if(std::getenv("VIO_PIXEL_GEOMETRY")){return actual_pixel_residual(camera,predicted,observed,error,measured);}
+ error=(predicted-observed).cwiseProduct(camera.getFocal());
+ if(measured){*measured=observed.cwiseProduct(camera.getFocal());}return error.allFinite();
+}
+
 inline bool propagate(const sba_imu::Pose&left,sba_imu::Pose&pred){
  Matrix P;if(!inverse(left.info.cast<double>(),P))return false;const auto&pi=left.preintegration;
  Eigen::Matrix3d R=left.w_from_imu.linear().cast<double>();Eigen::Matrix3d dR=pi.GetDeltaRotation(left.gyro_bias).cast<double>();
@@ -20,7 +37,7 @@ inline bool validate(const imu::ImuCalibration&cal,const camera::Rig&rig,const L
  bool finite=candidate.w_from_imu.matrix().allFinite()&&candidate.velocity.allFinite()&&candidate.gyro_bias.allFinite()&&candidate.acc_bias.allFinite()&&candidate.info.allFinite();
  if(finite){
   const Isometry3T corrected=cal.rig_from_imu()*candidate.w_from_imu.inverse();
-  for(const auto&o:observations){auto it=landmarks.find(o.id);if(it==landmarks.end()||o.cam_id>=rig.num_cameras)continue;++quality.total;const Vector3T pc=rig.camera_from_rig[o.cam_id]*corrected*it->second;if(!pc.allFinite()||pc.z()<=.05f)continue;const Vector2T error=(pc.hnormalized()-o.xy).cwiseProduct(rig.intrinsics[o.cam_id]->getFocal());if(!error.allFinite())continue;
+  for(const auto&o:observations){auto it=landmarks.find(o.id);if(it==landmarks.end()||o.cam_id>=rig.num_cameras)continue;++quality.total;const Vector3T pc=rig.camera_from_rig[o.cam_id]*corrected*it->second;if(!pc.allFinite()||pc.z()<=.05f)continue;Vector2T error,observed_pixel;if(!guard_pixel_residual(*rig.intrinsics[o.cam_id],pc.hnormalized(),o.xy,error,&observed_pixel)){continue;}
        if(error.norm()<=2.f)++pixel2_inliers;
        const Eigen::Vector2d normalized=(pc.hnormalized()-o.xy).template cast<double>();
        const Eigen::Matrix2d information=9.*o.xy_info.template cast<double>();
@@ -28,7 +45,7 @@ inline bool validate(const imu::ImuCalibration&cal,const camera::Rig&rig,const L
        // Same whitened residual and 2-DoF rejection threshold as the window.
        // The pixel cap prevents arbitrarily weak information accepting gross errors.
        if(!observation_consistent(information,normalized,error.cast<double>()))continue;
-       ++counts[o.cam_id];++quality.inliers;unique.insert(o.id);const Eigen::Vector2d xy=o.xy.cwiseProduct(rig.intrinsics[o.cam_id]->getFocal()).template cast<double>();lo[o.cam_id]=lo[o.cam_id].cwiseMin(xy);hi[o.cam_id]=hi[o.cam_id].cwiseMax(xy);}
+       ++counts[o.cam_id];++quality.inliers;unique.insert(o.id);const Eigen::Vector2d xy=observed_pixel.cast<double>();lo[o.cam_id]=lo[o.cam_id].cwiseMin(xy);hi[o.cam_id]=hi[o.cam_id].cwiseMax(xy);}
  }
  quality.unique=unique.size();for(int i=0;i<rig.num_cameras;++i){if(counts[i]>=5&&(hi[i]-lo[i]).minCoeff()>=16.)++quality.supported_cameras;}
  Matrix P,C;Decision decision;Eigen::Matrix<double,15,1>delta=Eigen::Matrix<double,15,1>::Zero();

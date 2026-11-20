@@ -32,6 +32,7 @@
 #include "cuda_modules/image_cast.h"
 #include "cuda_modules/image_pyramid.h"
 #include "cuda_modules/lk_tracker.h"
+#include "cuda_modules/st_tracker.h"
 
 #include "sof/feature_prediction_interface.h"
 #include "sof/kf_selector.h"
@@ -52,6 +53,11 @@ public:
 private:
   struct PrimaryToSecondaryGPUTracker {
     std::unique_ptr<GPULKFeatureTracker> tracker;
+    GPUSTFeatureTracker calibrated_tracker{20, 0};
+    GPUArrayPinned<TrackData> calibrated_tracks{1000};
+    GPUArrayPinned<int> calibrated_indices{1000};
+    std::vector<int> calibrated_lookup;
+    size_t calibrated_count = 0;
     GPUArrayPinned<TrackData> tracks_data{1000};
     Stream stream;
     bool was_launched = false;
@@ -66,7 +72,8 @@ private:
   Settings sof_settings_;
 
   void LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId secondary_id, const Sources& curr_sources,
-                                        Images& curr_images, const Sources& masks_sources, const std::vector<camera::Observation>& primary_obs,
+                                        Images& curr_images, const Sources& masks_sources,
+                                        const std::vector<camera::Observation>& primary_obs,
                                         std::vector<camera::Observation>* secondary_obs = nullptr) final;
   void GetTrackingResults(MulticamObservations& observations, const Sources& masks_sources, const Images& images) final;
 

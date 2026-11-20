@@ -1,3 +1,10 @@
+#include "pipelines/triangulator.h"
+#include "pipelines/triangulation_validation.h"
+#include "imu/lm_model_reduction.h"
+#include "pipelines/init_visual_admission.h"
+#include "camera/camera.h"
+#include "pipelines/imu_initialization_validation.h"
+#include "pipelines/gpu_window/frontend_guard_adapter.h"
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
@@ -211,3 +218,122 @@ TEST(StateMachineTest, PeriodicGravityRefinementWhenOk) {
 
 }  // namespace
 }  // namespace cuvslam::pipelines
+
+TEST(FisheyePixelGeometry, UsesOriginalImageUnitsAtLargeAngles) {
+ using namespace cuvslam;
+ camera::FisheyeCameraModel cam(Vector2T(512,512),Vector2T(191,191),Vector2T(256,256),0,0,0,0);
+ const Vector2T prediction(174,120),observation(173,120);Vector2T actual,measured;
+ ASSERT_TRUE(pipelines::frontend_guard::actual_pixel_residual(cam,prediction,observation,actual,&measured));
+ Vector2T a,b;ASSERT_TRUE(cam.denormalizePoint(prediction,a));ASSERT_TRUE(cam.denormalizePoint(observation,b));
+ EXPECT_LT((actual-(a-b)).norm(),1e-5f);EXPECT_LT(actual.norm(),2.f);
+ EXPECT_GT((prediction-observation).cwiseProduct(cam.getFocal()).norm(),100.f);
+}
+TEST(FisheyePixelGeometry, PinholeRemainsEquivalent) {
+ using namespace cuvslam;
+ camera::PinholeCameraModel cam(Vector2T(512,512),Vector2T(191,192),Vector2T(256,256));
+ const Vector2T prediction(1.5f,.8f),observation(1.4f,.9f);Vector2T actual;
+ ASSERT_TRUE(pipelines::frontend_guard::actual_pixel_residual(cam,prediction,observation,actual));
+ EXPECT_LT((actual-(prediction-observation).cwiseProduct(cam.getFocal())).norm(),1e-4f);
+}
+TEST(FisheyePixelGeometry, NonfiniteProjectionCannotSupportRecovery) {
+ using namespace cuvslam;
+ camera::FisheyeCameraModel cam(Vector2T(512,512),Vector2T(191,191),Vector2T(256,256),0,0,0,0);
+ Vector2T actual;
+ EXPECT_FALSE(pipelines::frontend_guard::actual_pixel_residual(cam,Vector2T(std::numeric_limits<float>::quiet_NaN(),1),Vector2T(0,0),actual));
+}
+
+TEST(VisualGyroSeed, NonidentityBodyDeltaIsRightMultiplied) {
+ using namespace cuvslam;
+ const Matrix3T previous=Eigen::AngleAxisf(.6f,Vector3T::UnitY()).toRotationMatrix();
+ const Matrix3T delta=Eigen::AngleAxisf(.3f,Vector3T::UnitX()).toRotationMatrix();Matrix3T out;
+ ASSERT_TRUE(pipelines::VisualGyroRotationSeed(previous,delta,true,out));
+ EXPECT_LT((out-previous*delta).norm(),1e-6f);EXPECT_GT((out-delta*previous).norm(),.1f);
+}
+TEST(VisualGyroSeed, UnhealthyOrInvalidRotationCannotMutateSeed) {
+ using namespace cuvslam;Matrix3T out=Matrix3T::Identity()*3.f;const auto before=out;
+ EXPECT_FALSE(pipelines::VisualGyroRotationSeed(Matrix3T::Identity(),Matrix3T::Identity(),false,out));EXPECT_TRUE(out==before);
+ Matrix3T invalid=Matrix3T::Identity();invalid(0,0)=std::numeric_limits<float>::infinity();
+ EXPECT_FALSE(pipelines::VisualGyroRotationSeed(Matrix3T::Identity(),invalid,true,out));EXPECT_TRUE(out==before);
+}
+
+
+TEST(InitVisualAdmission, UsesIndependentProjectionRatherThanAbsoluteSpeedCap) {
+ using namespace cuvslam;
+ camera::PinholeCameraModel cam(Vector2T(640,480),Vector2T(400,400),Vector2T(320,240));
+ camera::Rig rig;rig.num_cameras=1;rig.camera_from_rig[0]=Isometry3T::Identity();rig.intrinsics[0]=&cam;
+ std::unordered_map<TrackId,Vector3T> points;std::vector<camera::Observation> obs;
+ const Isometry3T ref=Isometry3T::Identity();
+ for(int i=0;i<50;++i){Vector3T p((i%7-3)*.2f,(i%11-5)*.13f,3.f+(i%3)*.4f);points[i+1]=p;obs.emplace_back(0,i+1,p.hnormalized(),Matrix2T::Identity()*160000.f/9.f);}
+ EXPECT_TRUE(pipelines::CheckInitPrediction(rig,points,obs,ref,ref,25).accepted);
+ auto inconsistent=ref;inconsistent.translation().x()=.5f;
+ EXPECT_FALSE(pipelines::CheckInitPrediction(rig,points,obs,ref,inconsistent,25).accepted);
+ // A large world displacement is valid when the actual measurements agree.
+ for(auto& [id,p]:points)p.x()+=10.f;
+ auto shifted=ref;shifted.translation().x()=10.f;
+ EXPECT_TRUE(pipelines::CheckInitPrediction(rig,points,obs,shifted,shifted,25).accepted);
+ EXPECT_TRUE(pipelines::BootstrapRetentionBudget(true,true,true,100,150,50));
+ EXPECT_FALSE(pipelines::BootstrapRetentionBudget(true,true,true,100,151,50));
+ EXPECT_FALSE(pipelines::BootstrapRetentionBudget(false,true,true,100,150,50));
+}
+
+TEST(TriangulatorCache, RetainsEveryVisibleTrackIndependentOfHashIterationOrder) {
+  using namespace cuvslam;
+  camera::Rig rig;
+  rig.num_cameras = 2;
+  rig.camera_from_rig[0] = Isometry3T::Identity();
+  rig.camera_from_rig[1] = Isometry3T::Identity();
+  rig.camera_from_rig[1].translation().x() = -.2f;
+  pipelines::MulticamTriangulator triangulator(rig);
+  std::vector<camera::Observation> observations;
+  for (uint64_t i = 1; i <= 64; ++i) {
+    const TrackId id = (uint64_t(2) << 56) | (i * 7919);
+    const Vector3T p((i%7)*.12f, (i%11)*.08f, 2.f + (i%13)*.1f);
+    observations.emplace_back(0, id, p.hnormalized(), Matrix2T::Identity());
+    observations.emplace_back(1, id, (rig.camera_from_rig[1]*p).hnormalized(), Matrix2T::Identity());
+  }
+  const auto first = triangulator.triangulate(Isometry3T::Identity(), observations);
+  ASSERT_EQ(first.size(), 64u);
+  for (int pass = 0; pass < 4; ++pass) {
+    std::reverse(observations.begin(), observations.end());
+    EXPECT_TRUE(triangulator.triangulate(Isometry3T::Identity(), observations).empty());
+  }
+  const auto removed_id = observations.front().id;
+  auto retained = observations;
+  retained.erase(std::remove_if(retained.begin(), retained.end(), [&](const auto& o) {
+    return o.id == removed_id;
+  }), retained.end());
+  EXPECT_TRUE(triangulator.triangulate(Isometry3T::Identity(), retained).empty());
+  const auto recreated = triangulator.triangulate(Isometry3T::Identity(), observations);
+  ASSERT_EQ(recreated.size(), 1u);
+  EXPECT_EQ(recreated.front().id, removed_id);
+}
+TEST(TriangulationGeometry, RejectsEpipolarCorrectionThatDoesNotExplainOriginalPixels) {
+  using namespace cuvslam;
+  camera::PinholeCameraModel camera(Vector2T(640,480),Vector2T(400,400),Vector2T(320,240));
+  camera::Rig rig; rig.num_cameras=2;
+  rig.intrinsics[0]=rig.intrinsics[1]=&camera;
+  rig.camera_from_rig[0]=rig.camera_from_rig[1]=Isometry3T::Identity();
+  rig.camera_from_rig[1].translation().x()=-.2f;
+  const Vector3T point(.2f,.1f,3.f);
+  std::vector<camera::Observation> o;
+  for (int c=0;c<2;++c) {
+    o.emplace_back(c,1,(rig.camera_from_rig[c]*point).hnormalized(),Matrix2T::Identity()*160000.f/9.f);
+  }
+  std::vector<std::reference_wrapper<const camera::Observation>> refs{std::cref(o[0]),std::cref(o[1])};
+  EXPECT_TRUE(pipelines::TriangulationObservationsConsistent(rig,Isometry3T::Identity(),point,refs));
+  o[1].xy.y()+=.1f;
+  EXPECT_FALSE(pipelines::TriangulationObservationsConsistent(rig,Isometry3T::Identity(),point,refs));
+  o[1].xy.y()-=.1f;
+  EXPECT_FALSE(pipelines::TriangulationObservationsConsistent(rig,Isometry3T::Identity(),-point,refs));
+}
+TEST(InitializationLM, QuadraticModelUsesTheSameLowerTriangleAsTheSolve) {
+  using namespace cuvslam;
+  Eigen::MatrixXf h(3,3); h << 6,0,0, 2,7,0, -1,3,8;
+  Eigen::VectorXf x(3),scale(3);x << .1f,-.2f,.3f;scale << 6,7,8;
+  const Eigen::MatrixXf full=h.selfadjointView<Eigen::Lower>();
+  const float expected=(x.dot(full*x)+.8f*x.dot(scale.asDiagonal()*x))/2.f;
+  EXPECT_NEAR(sba_imu::InitPredictedReduction(h,x,scale,.4f,2.f),expected,1e-7f);
+  EXPECT_GT(std::abs(expected-(x.dot(h*x)+.8f*x.dot(scale.asDiagonal()*x))/2.f),1e-3f);
+  h(0,1)=1000.f;h(0,2)=-1000.f;
+  EXPECT_NEAR(sba_imu::InitPredictedReduction(h,x,scale,.4f,2.f),expected,1e-7f);
+}

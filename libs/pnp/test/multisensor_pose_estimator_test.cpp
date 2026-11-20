@@ -1,3 +1,7 @@
+#include <iomanip>
+#include "pnp/cauchy_parameters.h"
+#include <cunls/robustifier/cauchy_loss_function_batch.h>
+#include "pnp/visual_support.h"
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
@@ -351,4 +355,131 @@ TEST(MultisensorPoseEstimatorTest, NonfiniteLMStepQualityMustReject) {
     EXPECT_FALSE((lm.*MinimizerControlAccess::accept())(q));
   }
 }
+TEST(MultisensorPoseEstimatorTest, WhitenedCudaPlusMatchesFourCameraJacobian) {
+  Isometry3T pose = Isometry3T::Identity();
+  pose.linear() = Eigen::AngleAxisf(.8f, Vector3T(1, -2, 3).normalized()).toRotationMatrix();
+  pose.translation() = Vector3T(1.2f, -.7f, .8f);
+  auto pack = [](const Isometry3T& m) {
+    cunls::SE3Transform x;
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 4; ++j) x[4 * i + j] = m.matrix()(i, j);
+    return x;
+  };
+  std::vector<cunls::SE3Transform> ex;
+  std::vector<cunls::Vector<3>> points;
+  std::vector<cunls::Vector<2>> observations;
+  std::vector<Vector2T> expected;
+  for (int c = 0; c < 4; ++c) {
+    Isometry3T e = Isometry3T::Identity();
+    e.linear() = Eigen::AngleAxisf(.1f * c, Vector3T(1, 2, -1).normalized()).toRotationMatrix();
+    e.translation() = Vector3T(.2f * c, -.08f * c, .04f * c);
+    for (int j = 0; j < 5; ++j) {
+      const Vector3T world = pose.inverse() * Vector3T(.2f * j - .4f, .1f * j - .2f, 4.f + .2f * j);
+      const Vector3T pc = e * pose * world;
+      ex.push_back(pack(e));
+      points.push_back({world.x(), world.y(), world.z()});
+      observations.push_back({0.f, 0.f});
+      expected.push_back(pc.hnormalized());
+    }
+  }
+  const auto packed = pack(pose);
+  cunls::DeviceVector<float> state(std::vector<float>(packed.begin(), packed.end()));
+  cunls::DeviceVector<cunls::SE3Transform> extrinsics(ex);
+  cunls::DeviceVector<cunls::Vector<3>> landmarks(points);
+  cunls::DeviceVector<cunls::Vector<2>> xy(observations);
+  cunls::DeviceVector<float*> pointers(std::vector<float*>(points.size(), state.data()));
+  cunls::DeviceVector<float> residual(2 * points.size()), jacobian(12 * points.size()), trial(16), delta(6);
+  cunls::DeviceVector<float*> trial_ptrs(std::vector<float*>(points.size(), trial.data()));
+  cunls::cuBLASHandle handle;
+  cunls::SE3StateBatch states(handle, state.data(), 1);
+  cunls::PnPFactorBatch factor(xy.data(), extrinsics.data(), landmarks.data(), points.size(), 1e-3f);
+  std::vector<float> roots(4*points.size());
+  for(size_t i=0;i<points.size();++i){roots[4*i]=2.f;roots[4*i+1]=.3f;roots[4*i+2]=-.2f;roots[4*i+3]=1.1f;
+    expected[i]=(Eigen::Matrix2f() << 2.f,.3f,-.2f,1.1f).finished()*expected[i];}
+  cunls::DeviceVector<float> whitening(roots);factor.SetSqrtInformation(whitening.data());
+  ASSERT_TRUE(factor.Evaluate(residual.data(), jacobian.data(), pointers.data(), 0));
+  std::vector<float> r(2 * points.size()), J(12 * points.size());
+  ASSERT_EQ(cudaMemcpy(r.data(), residual.data(), r.size() * sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+  ASSERT_EQ(cudaMemcpy(J.data(), jacobian.data(), J.size() * sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+  for (size_t i = 0; i < points.size(); ++i)
+    for (int k = 0; k < 2; ++k) EXPECT_NEAR(r[2 * i + k], expected[i][k], 2e-6f);
+  double worst = 0;
+  for (int c = 0; c < 6; ++c) {
+    std::vector<float> sides[2];
+    for (int side = 0; side < 2; ++side) {
+      float d[6]{};
+      d[c] = (side == 0 ? 1.f : -1.f) * 2e-4f;
+      ASSERT_EQ(cudaMemcpy(delta.data(), d, sizeof(d), cudaMemcpyHostToDevice), cudaSuccess);
+      states.Plus(state.data(), delta.data(), trial.data(), 0);
+      ASSERT_TRUE(factor.Evaluate(residual.data(), nullptr, trial_ptrs.data(), 0));
+      sides[side].resize(r.size());
+      ASSERT_EQ(cudaMemcpy(sides[side].data(), residual.data(), r.size() * sizeof(float), cudaMemcpyDeviceToHost),
+                cudaSuccess);
+    }
+    for (size_t k = 0; k < r.size(); ++k)
+      worst = std::max(worst, std::abs(double((sides[0][k] - sides[1][k]) / 4e-4f - J[6 * k + c])));
+  }
+  RecordProperty("cuda_plus_jacobian_max_abs_error", std::to_string(worst));
+  EXPECT_LT(worst, .006);
+}
+
+
+TEST(VisualSupportTest, UnrelatedOutliersDoNotDiluteObservableConsensus) {
+ Eigen::MatrixXd j=Eigen::MatrixXd::Zero(20,6);j.topRows(6).setIdentity();j.bottomRows(6).setIdentity();
+ EXPECT_TRUE(cuvslam::pnp::HasObservableVisualSupport(j,10,5));
+ EXPECT_FALSE(cuvslam::pnp::HasObservableVisualSupport(j,10,11));
+}
+TEST(VisualSupportTest, DegenerateConsensusCannotSupportSixDofPose) {
+ Eigen::MatrixXd j=Eigen::MatrixXd::Ones(200,6);
+ EXPECT_FALSE(cuvslam::pnp::HasObservableVisualSupport(j,100,5));
+ j(0,0)=std::numeric_limits<double>::quiet_NaN();
+ EXPECT_FALSE(cuvslam::pnp::HasObservableVisualSupport(j,100,5));
+}
 }  // namespace test::pnp
+
+#include <fstream>
+#include <sstream>
+#include <cstring>
+TEST(FrozenBootstrapPnP, RepeatsSameInputWithoutChangingAcceptance) {
+ using namespace cuvslam;
+ const char* path=std::getenv("VIO_FROZEN_INPUT");
+ if(!path) GTEST_SKIP()<<"Frozen input is supplied by the diagnostic harness";
+ std::ifstream input(path);ASSERT_TRUE(input.good());long long timestamp;int accepted,ncam;input>>timestamp>>accepted>>ncam;
+ auto read_pose=[&](){Isometry3T pose=Isometry3T::Identity();for(int r=0;r<4;++r)for(int c=0;c<4;++c)input>>pose.matrix()(r,c);return pose;};
+ const auto initial=read_pose();const auto recorded=read_pose();
+ camera::Rig rig;rig.num_cameras=ncam;
+ for(int c=0;c<ncam;++c)rig.camera_from_rig[c]=read_pose();
+ std::ifstream calib(std::string(path)+".intrinsics");ASSERT_TRUE(calib.good());
+ std::vector<std::unique_ptr<camera::FisheyeCameraModel>> models;
+ for(int c=0;c<ncam;++c){float w,h,fx,fy,cx,cy,k1,k2,k3,k4;calib>>w>>h>>fx>>fy>>cx>>cy>>k1>>k2>>k3>>k4;models.emplace_back(std::make_unique<camera::FisheyeCameraModel>(Vector2T(w,h),Vector2T(fx,fy),Vector2T(cx,cy),k1,k2,k3,k4));rig.intrinsics[c]=models.back().get();}
+ std::unordered_map<TrackId,Vector3T> points;std::vector<camera::Observation> observations;
+ std::string line;std::getline(input,line);
+ while(std::getline(input,line)){std::istringstream row(line);TrackId id;int cam;float x,y,z,u,v,a,b,d,px,py;if(!(row>>id>>cam>>x>>y>>z>>u>>v>>a>>b>>d>>px>>py))continue;points[id]=Vector3T(x,y,z);Matrix2T info;info<<a,b,b,d;observations.emplace_back(CameraId(cam),id,Vector2T(u,v),info);}
+ ASSERT_FALSE(observations.empty());pnp::MultisensorPoseEstimator solver(rig);std::optional<Isometry3T> first;
+ for(int repeat=0;repeat<3;++repeat){auto pose=initial;Matrix6T info;const int mode=std::getenv("VIO_FROZEN_LOSS_MODE")?std::atoi(std::getenv("VIO_FROZEN_LOSS_MODE")):0;bool ok=solver.solve(pose,info,observations,points,{}, {}, {},std::nullopt,nullptr,mode);ASSERT_TRUE(solver.last_visual_trial());const auto& trial=*solver.last_visual_trial();
+   std::ofstream output(std::string(path)+".mode"+std::to_string(mode)+".gpu"+std::to_string(repeat));output<<std::setprecision(17)<<int(ok)<<'\n';for(int r=0;r<4;++r){for(int c=0;c<4;++c)output<<trial.matrix()(r,c)<<' ';output<<'\n';}
+   if(first){EXPECT_EQ(std::memcmp(first->matrix().data(),trial.matrix().data(),16*sizeof(float)),0);}else{first=trial;}
+   if(!ok){EXPECT_EQ(std::memcmp(pose.matrix().data(),initial.matrix().data(),16*sizeof(float)),0)<<"Rejected trial modified caller pose";}
+ }
+}
+
+TEST(VisualCauchy, GpuCostAndDerivativeAreConsistentForBothAdapters) {
+ using namespace cuvslam;
+ float* errors=nullptr;float3* values=nullptr;
+ ASSERT_EQ(cudaMallocManaged(&errors,3*sizeof(float)),cudaSuccess);
+ ASSERT_EQ(cudaMallocManaged(&values,3*sizeof(float3)),cudaSuccess);
+ errors[0]=.1f;errors[1]=1.f;errors[2]=9.21f;
+ for(int mode:{1,2}) {
+  const auto p=pnp::VisualCauchyParameters(1.f,mode);
+  EXPECT_NEAR(double(p.b)*p.c,1.,1e-6);
+  cunls::CauchyLossFunctionBatch loss(p.b,p.c);ASSERT_TRUE(loss.Evaluate(errors,values,3,nullptr));ASSERT_EQ(cudaDeviceSynchronize(),cudaSuccess);
+  for(int i=0;i<3;++i) {
+    const double x=errors[i],h=1e-5;
+    const auto cost=[&](double s){return double(p.weight)*p.b*std::log1p(p.c*s);};
+    const double numeric=(cost(x+h)-cost(x-h))/(2*h);
+    EXPECT_NEAR(p.weight*values[i].y,numeric,1e-5);
+    EXPECT_NEAR(p.weight*values[i].x,cost(x),1e-5);
+  }
+ }
+ cudaFree(errors);cudaFree(values);
+}

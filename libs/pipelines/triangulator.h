@@ -17,11 +17,9 @@
 
 #pragma once
 
-#include <random>
 #include <unordered_set>
 #include <vector>
 
-#include "camera/frustum_intersection_graph.h"
 #include "camera/observation.h"
 #include "camera/rig.h"
 #include "common/isometry.h"
@@ -44,10 +42,8 @@ public:
 
 private:
   camera::Rig rig_;
-  camera::FrustumIntersectionGraph fig_;
 
   std::unordered_set<TrackId> visible_tracks_;
-  std::unordered_set<TrackId> visible_traingulated_tracks_;
   std::unordered_set<TrackId> triangulated_tracks_;
 
   profiler::VioProfiler::DomainHelper profiler_domain_ = profiler::VioProfiler::DomainHelper("MulticamTriangulator");

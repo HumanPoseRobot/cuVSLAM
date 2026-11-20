@@ -1,3 +1,7 @@
+#include "imu/lm_model_reduction.h"
+#include <fstream>
+#include <iomanip>
+#include <cstdlib>
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -42,6 +46,69 @@ struct InertialJacobians {
 }  // namespace
 
 namespace cuvslam::sba_imu {
+namespace {
+template <class Derived>
+void AuditArray(std::ostream& out, const Eigen::MatrixBase<Derived>& value) {
+  out << '[';
+  for (Eigen::Index r = 0; r < value.rows(); ++r) {
+    for (Eigen::Index c = 0; c < value.cols(); ++c) {
+      if (r || c) out << ',';
+      const double x = value(r, c);
+      if (std::isfinite(x)) out << x;
+      else out << "null";
+    }
+  }
+  out << ']';
+}
+int64_t AuditAnchor(const std::vector<Pose>& poses) {
+  if (poses.size() < 2) return -1;
+  const auto& m = poses[poses.size() - 2].preintegration.measurements();
+  return m.empty() ? -1 : m.back().time_ns;
+}
+void AuditInit(const char* stage, const std::vector<Pose>& poses, const Matrix3T& Rg,
+               const Vector3T& bg, const Vector3T& ba, const Matrix3T& prior) {
+  const char* dir = std::getenv("VIO_INIT_SNAPSHOT_DIR");
+  if (!dir) return;
+  std::ofstream out(std::string(dir) + "/" + std::to_string(AuditAnchor(poses)) + "_" + stage + ".json");
+  out << std::setprecision(17) << "{\"stage\":\"" << stage << "\",\"Rgravity\":";
+  AuditArray(out, Rg); out << ",\"bg\":"; AuditArray(out, bg);
+  out << ",\"ba\":"; AuditArray(out, ba); out << ",\"acc_prior\":"; AuditArray(out, prior);
+  out << ",\"poses\":[";
+  for (size_t i = 0; i < poses.size(); ++i) {
+    if (i) out << ',';
+    out << "{\"R\":"; AuditArray(out, poses[i].w_from_imu.linear());
+    out << ",\"p\":"; AuditArray(out, poses[i].w_from_imu.translation());
+    out << ",\"v\":"; AuditArray(out, poses[i].velocity); out << '}';
+  }
+  out << "],\"edges\":[";
+  for (size_t i = 0; i + 1 < poses.size(); ++i) {
+    if (i) out << ',';
+    const auto& pi = poses[i].preintegration;
+    out << "{\"dt\":" << pi.GetDeltaT_s() << ",\"dR\":"; AuditArray(out, pi.GetDeltaRotation(bg));
+    out << ",\"dV\":"; AuditArray(out, pi.GetDeltaVelocity(bg, Vector3T::Zero()));
+    out << ",\"dP\":"; AuditArray(out, pi.GetDeltaPosition(bg, Vector3T::Zero()));
+    out << ",\"JVa\":"; AuditArray(out, pi.JVa); out << ",\"JPa\":"; AuditArray(out, pi.JPa);
+    out << ",\"JRg\":"; AuditArray(out, pi.JRg); out << ",\"cov\":"; AuditArray(out, pi.cov_matrix_);
+    out << '}';
+  }
+  out << "]}";
+}
+void AuditLm(const std::vector<Pose>& poses, int iteration, const Eigen::MatrixXf& H,
+             const Eigen::VectorXf& gradient, const Eigen::VectorXf& step, float lambda,
+             float before, float after, float predicted) {
+  const char* dir = std::getenv("VIO_INIT_SNAPSHOT_DIR");
+  if (!dir) return;
+  std::ofstream out(std::string(dir) + "/" + std::to_string(AuditAnchor(poses)) + "_lm.jsonl", std::ios::app);
+  out << std::setprecision(17) << "{\"iteration\":" << iteration << ",\"size\":" << H.rows()
+      << ",\"lambda\":" << lambda << ",\"before\":" << before << ",\"after\":" << after
+      << ",\"predicted\":" << predicted << ",\"H\":";
+  AuditArray(out, H); out << ",\"gradient\":"; AuditArray(out, gradient);
+  out << ",\"step\":"; AuditArray(out, step); out << "}\n";
+}
+}  // namespace
+
+
+
 
 float InertialOptimizer::calc_cost_with_update(const std::vector<Pose>& poses, const Matrix3T& Rgravity,
                                                const Vector3T& gyro_bias, const Vector3T& acc_bias,
@@ -603,6 +670,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
   }
 
   Vector3T acc_bias = Vector3T::Zero();
+  AuditInit("prelinear",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
   bool linear_ok = LinearAlignment(poses, gyro_bias, Rgravity, acc_bias);
   if (!linear_ok) {
     // A failed metric alignment is not an initialized inertial state. Averaging
@@ -612,6 +680,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     return false;
   }
   RefineGravity(poses, gyro_bias, Rgravity, acc_bias);
+  AuditInit("refined",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
 
   Eigen::MatrixXf hessian;
   // 3 - for each velocity in each pose, 2 - for gravity, 3 - for gyro bias, 3 - for acc bias
@@ -655,8 +724,10 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     ev2.Pop();
 
     auto cost = calc_cost_with_update(poses, Rgravity, gyro_bias, acc_bias, step, robustifier);
-    auto predicted_relative_reduction =
-        step.dot(hessian * step) / current_cost + 2.f * lambda * step.dot(scaling.asDiagonal() * step) / current_cost;
+    auto predicted_relative_reduction = std::getenv("VIO_INIT_SYMMETRIC_GAIN")
+        ? InitPredictedReduction(hessian, step, scaling, lambda, current_cost)
+        : step.dot(hessian * step) / current_cost +
+              2.f * lambda * step.dot(scaling.asDiagonal() * step) / current_cost;
 
     if ((predicted_relative_reduction < sqrt_epsilon()) && (step.template lpNorm<1>() < sqrt_epsilon())) {
       current_cost = cost;
@@ -720,6 +791,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     }
   } while (num_iterations < max_iterations);
 
+  AuditInit("final",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
   // Always commit the best available biases: LM result if it improved, otherwise
   // the LinearAlignment/RefineGravity estimates which are already valid.
   if (current_cost >= initial_cost) {
@@ -790,6 +862,7 @@ bool InertialOptimizer::OptimizeInertialAdaptive(
     Rgravity = SolveGravityDirection(poses, default_gravity);
   }
   RefineGravity(poses, gyro_bias, Rgravity, acc_bias);
+  AuditInit("refined",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
 
   Eigen::MatrixXf hessian;
   hessian.setZero(3 * num_poses + 8, 3 * num_poses + 8);
@@ -820,8 +893,10 @@ bool InertialOptimizer::OptimizeInertialAdaptive(
     ev2.Pop();
 
     auto cost = calc_cost_with_update(poses, Rgravity, gyro_bias, acc_bias, step, robustifier);
-    auto predicted_relative_reduction =
-        step.dot(hessian * step) / current_cost + 2.f * lambda * step.dot(scaling.asDiagonal() * step) / current_cost;
+    auto predicted_relative_reduction = std::getenv("VIO_INIT_SYMMETRIC_GAIN")
+        ? InitPredictedReduction(hessian, step, scaling, lambda, current_cost)
+        : step.dot(hessian * step) / current_cost +
+              2.f * lambda * step.dot(scaling.asDiagonal() * step) / current_cost;
 
     if ((predicted_relative_reduction < sqrt_epsilon()) && (step.template lpNorm<1>() < sqrt_epsilon())) {
       current_cost = cost;

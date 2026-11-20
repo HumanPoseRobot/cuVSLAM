@@ -177,3 +177,38 @@ TEST(JointFourFrameTest, CorrectsPerturbedPrediction) {
 }
 }  // namespace
 }  // namespace cuvslam::sba_imu
+
+namespace cuvslam::sba_imu {
+TEST(ImuBoundaryTest, CameraDropGapPreservesFullDurationAndReintegration) {
+  // Four missing 30 Hz exposures: the next delivered image is ~5 periods later.
+  // Continuous IMU coverage must integrate the entire interval, not one frame.
+  auto samples = Samples(200000000);
+  for (auto& sample : samples) {
+    sample.angular_velocity.setZero();
+  }
+  constexpr int64_t start_ns = 1333333;
+  constexpr int64_t end_ns = 168000000;
+  const double duration = double(end_ns - start_ns) * 1e-9;
+  auto integration = Integrate(samples, start_ns, end_ns);
+  ASSERT_FALSE(integration.empty());
+  EXPECT_NEAR(integration.dT_s, duration, 1e-7);
+  EXPECT_NEAR(integration.dV.x(), 2. * duration, 1e-6);
+  EXPECT_NEAR(integration.dP.x(), duration * duration, 1e-7);
+  integration.SetNewBias(Vector3T::Zero(), Vector3T(.3f, 0.f, 0.f));
+  integration.Reintegrate(imu::ImuCalibration{});
+  EXPECT_NEAR(integration.dT_s, duration, 1e-7);
+  EXPECT_NEAR(integration.dV.x(), 1.7 * duration, 1e-6);
+  EXPECT_NEAR(integration.dP.x(), .85 * duration * duration, 1e-7);
+}
+TEST(ImuVelocityTest, TimestampGapAndHeadRotationDoNotInflateVelocity) {
+  constexpr int64_t previous_ns = 1793794309405789429LL;
+  constexpr int64_t current_ns = previous_ns + 166711500LL;
+  const float dt = static_cast<float>(double(current_ns - previous_ns) * 1e-9);
+  Isometry3T previous = Isometry3T::Identity(), current = previous;
+  previous.translation() = Vector3T(3.f, -2.f, 1.f);
+  const Vector3T expected(1.f, -.5f, .2f);
+  current.translation() = previous.translation() + expected * dt;
+  current.linear() = Eigen::AngleAxisf(.3f, Vector3T::UnitY()).toRotationMatrix();
+  EXPECT_LT((WorldVelocity(previous, current, dt) - expected).norm(), 2e-6f);
+}
+}  // namespace cuvslam::sba_imu

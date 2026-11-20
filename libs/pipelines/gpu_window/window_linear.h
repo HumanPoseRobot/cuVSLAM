@@ -3,6 +3,7 @@
 #include <Eigen/Eigenvalues>
 #include <limits>
 #include <set>
+#include <type_traits>
 #include <stdexcept>
 #include "window_types.h"
 namespace gpu_window {
@@ -104,25 +105,34 @@ struct Reduced {
   Matrix rows;
   Vector residual;
 };
-inline Reduced assemble(const Problem& p, const Evaluation& e, bool marginal) {
+template <class EvaluationType>
+inline Reduced assemble(const Problem& p, const EvaluationType& e, bool marginal) {
+  using Scalar = typename std::decay_t<decltype(e.prior)>::value_type;
   std::vector<Matrix> blocks;
   std::vector<Vector> residuals;
-  Eigen::Map<const Eigen::Matrix<float, Dim, Dim, Eigen::RowMajor>> pj(e.prior_j.data());
-  Eigen::Map<const Eigen::VectorXf> pr(e.prior.data(), Dim);
-  blocks.push_back(pj.cast<double>());
-  residuals.push_back(pr.cast<double>());
+  const int prior_rows = static_cast<int>(e.prior.size());
+  if (prior_rows > Dim || e.prior_j.size() != size_t(prior_rows)*prior_rows) {
+    throw std::runtime_error("window prior row shape");
+  }
+  Eigen::Map<const Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+      pj(e.prior_j.data(), prior_rows, prior_rows);
+  Eigen::Map<const Eigen::Matrix<Scalar, Eigen::Dynamic, 1>> pr(e.prior.data(), prior_rows);
+  Matrix prior = Matrix::Zero(prior_rows, Dim);
+  prior.leftCols(prior_rows) = pj.template cast<double>();
+  blocks.push_back(std::move(prior));
+  residuals.push_back(pr.template cast<double>());
   for (size_t z = 0; z < p.edges.size(); ++z) {
     const auto& f = p.edges[z];
     if (marginal && f.left != 0 && f.right != 0) {
       continue;
     }
-    Eigen::Map<const Eigen::Matrix<float, 15, 30, Eigen::RowMajor>> J(e.edge_j.data() + z * 450);
-    Eigen::Map<const Eigen::Matrix<float, 15, 1>> r(e.edge.data() + z * 15);
+    Eigen::Map<const Eigen::Matrix<Scalar, 15, 30, Eigen::RowMajor>> J(e.edge_j.data() + z * 450);
+    Eigen::Map<const Eigen::Matrix<Scalar, 15, 1>> r(e.edge.data() + z * 15);
     Matrix block = Matrix::Zero(15, Dim);
-    block.block(0, f.left * 15, 15, 15) = J.leftCols(15).cast<double>();
-    block.block(0, f.right * 15, 15, 15) = J.rightCols(15).cast<double>();
+    block.block(0, f.left * 15, 15, 15) = J.leftCols(15).template cast<double>();
+    block.block(0, f.right * 15, 15, 15) = J.rightCols(15).template cast<double>();
     blocks.push_back(block);
-    residuals.push_back(r.cast<double>());
+    residuals.push_back(r.template cast<double>());
   }
   std::set<int> touched;
   for (auto& v : p.visuals) {
@@ -147,13 +157,13 @@ inline Reduced assemble(const Problem& p, const Evaluation& e, bool marginal) {
     for (size_t k = 0; k < indices.size(); ++k) {
       int i = indices[k];
       const auto& v = p.visuals[i];
-      Eigen::Map<const Eigen::Matrix<float, 2, 18, Eigen::RowMajor>> J(e.visual_j.data() + i * 36);
-      Eigen::Map<const Eigen::Vector2f> r(e.visual.data() + i * 2);
-      double rn = r.cast<double>().norm();
+      Eigen::Map<const Eigen::Matrix<Scalar, 2, 18, Eigen::RowMajor>> J(e.visual_j.data() + i * 36);
+      Eigen::Map<const Eigen::Matrix<Scalar, 2, 1>> r(e.visual.data() + i * 2);
+      double rn = r.template cast<double>().norm();
       double weight = rn > p.huber ? std::sqrt(p.huber / rn) : 1.;
-      pose.block(2 * k, 15 * v.node, 2, 15) = weight * J.leftCols(15).cast<double>();
-      point.block(2 * k, 0, 2, 3) = weight * J.rightCols(3).cast<double>();
-      residual.segment(2 * k, 2) = weight * r.cast<double>();
+      pose.block(2 * k, 15 * v.node, 2, 15) = weight * J.leftCols(15).template cast<double>();
+      point.block(2 * k, 0, 2, 3) = weight * J.rightCols(3).template cast<double>();
+      residual.segment(2 * k, 2) = weight * r.template cast<double>();
     }
     Matrix reduced;
     Vector rr;

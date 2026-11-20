@@ -32,7 +32,7 @@ using WMatrix = Eigen::MatrixXd;
 using WVector = Eigen::VectorXd;
 using WinProblem = gpu_window::Problem;
 using WinResult = gpu_window::Result;
-using WinEvaluation = gpu_window::Evaluation;
+using WinEvaluation = gpu_window::fp64::Evaluation;
 using gpu_window::assemble;
 using gpu_window::compress_prior;
 using gpu_window::Dim;
@@ -77,9 +77,26 @@ bool schur_window() {
   return value && std::strcmp(value, "schur") == 0;
 }
 WinEvaluation evaluate_window(const WinProblem& p, const WinResult& r) {
-  // Share the existing posterior evaluation path in the FP64 ablation.
-  return (cpu_window() || fp64_window()) ? EvaluateCpu(p, r) : Evaluate(p, r);
+  // The optimizer's FP64 path must retain FP64 rows through posterior recovery
+  // and marginalization too. Previously EvaluateCpu rounded every Jacobian and
+  // residual to float before those nominally-double QR operations.
+  if (fp64_window() && std::getenv("VIO_WINDOW_FP64_POSTERIOR")) {
+    std::vector<double> x(15*p.count + 3*p.points.size(),0.);
+    for (int i=0;i<15*p.count;++i) { x[i]=r.x[i]; }
+    for (size_t i=0;i<r.points.size();++i) { x[15*p.count+i]=r.points[i]; }
+    return gpu_window::fp64::EvaluateHost(p,x,true);
+  }
+  const auto legacy=(cpu_window() || fp64_window()) ? EvaluateCpu(p,r) : Evaluate(p,r);
+  WinEvaluation result;
+  result.prior.assign(legacy.prior.begin(),legacy.prior.end());
+  result.prior_j.assign(legacy.prior_j.begin(),legacy.prior_j.end());
+  result.edge.assign(legacy.edge.begin(),legacy.edge.end());
+  result.edge_j.assign(legacy.edge_j.begin(),legacy.edge_j.end());
+  result.visual.assign(legacy.visual.begin(),legacy.visual.end());
+  result.visual_j.assign(legacy.visual_j.begin(),legacy.visual_j.end());
+  return result;
 }
+
 template <class M>
 void copy_matrix(double* p, const M& m) {
   for (int i = 0; i < m.rows(); ++i) {
@@ -587,7 +604,9 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
     const auto optimizer_start = Clock::now();
     if (const char* directory = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_DIR")) {
       // Capture immutable input before either optimizer or outlier pruning runs.
-      if (t >= 188000000000LL && t <= 202000000000LL) {
+      const char* low = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_MIN_NS");
+      const char* high = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_MAX_NS");
+      if ((!low || t >= std::strtoll(low, nullptr, 10)) && (!high || t <= std::strtoll(high, nullptr, 10))) {
         std::string path =
             std::string(directory) + "/window_" + std::to_string(t) + "_" + std::to_string(pass) + ".bin";
         gpu_window::fp64::SaveProblem(p, path.c_str());

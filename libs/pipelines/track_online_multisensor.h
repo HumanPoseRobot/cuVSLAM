@@ -85,7 +85,8 @@ public:
   std::optional<ImuState> GetImuState() const;
 
   bool has_imu() const { return with_imu_; }
-  bool can_reacquire_after_loss() const { return imu_ && imu_->can_reacquire_after_loss(); }
+  bool bootstrap_refresh_requested() const { return bootstrap_refresh_requested_; }
+  bool can_reacquire_after_loss() const { return bootstrap_retaining_ || (imu_ && imu_->can_reacquire_after_loss()); }
 
 private:
   bool solveNextFrameVisualOnly(int64_t time_ns, const sof::FrameState& frameState,
@@ -109,6 +110,9 @@ private:
                     Tracks3DMap& out_tracks3d, const Isometry3T& rig_from_world) const;
 
   TemporalLandmarks temporal_;
+  map::Map<TrackId,Vector3T> bootstrap_stereo_landmarks_;
+  bool bootstrap_refresh_requested_ = false;
+  bool bootstrap_retaining_ = false;
   bool temporal_audit_ = false;
   bool temporal_insert_ = false;
   bool metric_init_enabled_ = false;

@@ -15,6 +15,7 @@
 project(cuda_kernels LANGUAGES CXX CUDA)
 
 set(SOURCES
+    calibrated_patch_check.cu
     convolutions.cu
     gftt.cu
     image_pyramid.cu

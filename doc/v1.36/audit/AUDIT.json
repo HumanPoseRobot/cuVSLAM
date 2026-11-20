@@ -1,0 +1,2082 @@
+{
+  "halo851_152938": {
+    "frames": 368,
+    "dt_ms": {
+      "min": 33.2975,
+      "median": 33.3335,
+      "p95": 33.3485,
+      "max": 33.368500000000004
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 180,
+      "frame": 181,
+      "time_s": 5.9999775,
+      "speed_mps": 1.0793485658987205,
+      "step_m": 0.035977925747102055,
+      "dt_ms": 33.333,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 11.34319871198386,
+      "history_fetch_ms": 0.00034493859857320786
+    },
+    "imu_interval": {
+      "count": 366,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 0,
+      "solves": 0,
+      "commits": 0,
+      "rejected": 0,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 0,
+      "max_position_mismatch_m": 0,
+      "max_velocity_mismatch_mps": 0,
+      "transaction_reject_reasons": {},
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 0,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 370,
+        "dt_ms": {
+          "min": 33.281,
+          "median": 33.333999999999996,
+          "p95": 33.370999999999995,
+          "max": 33.382
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.341732,
+        "peak_selected_index": 181,
+        "peak_image_dt_ms": 33.333,
+        "peak_group": 184
+      },
+      {
+        "camera": 1,
+        "frames": 370,
+        "dt_ms": {
+          "min": 33.299,
+          "median": 33.333,
+          "p95": 33.3486,
+          "max": 33.372
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.075777,
+        "peak_selected_index": 181,
+        "peak_image_dt_ms": 33.335,
+        "peak_group": 184
+      },
+      {
+        "camera": 2,
+        "frames": 370,
+        "dt_ms": {
+          "min": 33.299,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.372
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.045383,
+        "peak_selected_index": 181,
+        "peak_image_dt_ms": 33.333999999999996,
+        "peak_group": 184
+      },
+      {
+        "camera": 3,
+        "frames": 370,
+        "dt_ms": {
+          "min": 33.294,
+          "median": 33.333999999999996,
+          "p95": 33.3506,
+          "max": 33.370999999999995
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.045384,
+        "peak_selected_index": 181,
+        "peak_image_dt_ms": 33.332,
+        "peak_group": 184
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "halo851_154711": {
+    "frames": 555,
+    "dt_ms": {
+      "min": 33.3085,
+      "median": 33.333,
+      "p95": 33.3465,
+      "max": 33.36
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 40,
+      "frame": 41,
+      "time_s": 1.3333395000000001,
+      "speed_mps": 0.6660129232171903,
+      "step_m": 0.02218788753051909,
+      "dt_ms": 33.3145,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 6.84438506141305,
+      "history_fetch_ms": 0.00034796539694070816
+    },
+    "imu_interval": {
+      "count": 553,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 0,
+      "solves": 0,
+      "commits": 0,
+      "rejected": 0,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 0,
+      "max_position_mismatch_m": 0,
+      "max_velocity_mismatch_mps": 0,
+      "transaction_reject_reasons": {},
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 0,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 557,
+        "dt_ms": {
+          "min": 33.282,
+          "median": 33.333,
+          "p95": 33.372,
+          "max": 33.397
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.356232,
+        "peak_selected_index": 41,
+        "peak_image_dt_ms": 33.376,
+        "peak_group": 43
+      },
+      {
+        "camera": 1,
+        "frames": 557,
+        "dt_ms": {
+          "min": 33.303999999999995,
+          "median": 33.333,
+          "p95": 33.345,
+          "max": 33.362
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.077277,
+        "peak_selected_index": 41,
+        "peak_image_dt_ms": 33.321999999999996,
+        "peak_group": 43
+      },
+      {
+        "camera": 2,
+        "frames": 557,
+        "dt_ms": {
+          "min": 33.305,
+          "median": 33.333,
+          "p95": 33.346,
+          "max": 33.365
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.043883,
+        "peak_selected_index": 41,
+        "peak_image_dt_ms": 33.318,
+        "peak_group": 43
+      },
+      {
+        "camera": 3,
+        "frames": 557,
+        "dt_ms": {
+          "min": 33.297,
+          "median": 33.333,
+          "p95": 33.348,
+          "max": 33.36
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.043884,
+        "peak_selected_index": 41,
+        "peak_image_dt_ms": 33.311,
+        "peak_group": 43
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "halo851_155031": {
+    "frames": 1606,
+    "dt_ms": {
+      "min": 33.2785,
+      "median": 33.3335,
+      "p95": 33.347,
+      "max": 33.3785
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 1420,
+      "frame": 1421,
+      "time_s": 47.333346000000006,
+      "speed_mps": 1.4464908997992154,
+      "step_m": 0.04821588116300725,
+      "dt_ms": 33.333,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 19.405533326789737,
+      "history_fetch_ms": 0.0004600733518600464
+    },
+    "imu_interval": {
+      "count": 1602,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 15,
+      "solves": 2,
+      "commits": 2,
+      "rejected": 13,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 15,
+      "max_position_mismatch_m": 3.65306448e-07,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 10
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 844,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 1608,
+        "dt_ms": {
+          "min": 33.278999999999996,
+          "median": 33.333,
+          "p95": 33.370999999999995,
+          "max": 33.387
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.345232,
+        "peak_selected_index": 1421,
+        "peak_image_dt_ms": 33.335,
+        "peak_group": 1983
+      },
+      {
+        "camera": 1,
+        "frames": 1608,
+        "dt_ms": {
+          "min": 33.275999999999996,
+          "median": 33.333,
+          "p95": 33.346,
+          "max": 33.385
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.09777699999999999,
+        "peak_selected_index": 1421,
+        "peak_image_dt_ms": 33.333,
+        "peak_group": 1983
+      },
+      {
+        "camera": 2,
+        "frames": 1608,
+        "dt_ms": {
+          "min": 33.269999999999996,
+          "median": 33.333,
+          "p95": 33.347,
+          "max": 33.39
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.051883,
+        "peak_selected_index": 1421,
+        "peak_image_dt_ms": 33.333,
+        "peak_group": 1983
+      },
+      {
+        "camera": 3,
+        "frames": 1608,
+        "dt_ms": {
+          "min": 33.287,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.379999999999995
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.051884,
+        "peak_selected_index": 1421,
+        "peak_image_dt_ms": 33.333,
+        "peak_group": 1983
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "halo851_155625": {
+    "frames": 491,
+    "dt_ms": {
+      "min": 33.3055,
+      "median": 33.333,
+      "p95": 33.347500000000004,
+      "max": 33.3675
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 43,
+      "frame": 44,
+      "time_s": 1.4333355,
+      "speed_mps": 1.03105200959164,
+      "step_m": 0.034378367155814056,
+      "dt_ms": 33.343,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 3.2917422940954566,
+      "history_fetch_ms": 0.0004409812390804291
+    },
+    "imu_interval": {
+      "count": 488,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 0,
+      "solves": 0,
+      "commits": 0,
+      "rejected": 0,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 0,
+      "max_position_mismatch_m": 0,
+      "max_velocity_mismatch_mps": 0,
+      "transaction_reject_reasons": {},
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 0,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.272,
+          "median": 33.333,
+          "p95": 33.372,
+          "max": 33.4
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.350732,
+        "peak_selected_index": 44,
+        "peak_image_dt_ms": 33.294,
+        "peak_group": 2217
+      },
+      {
+        "camera": 1,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.302,
+          "median": 33.333,
+          "p95": 33.34545,
+          "max": 33.365
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.076277,
+        "peak_selected_index": 44,
+        "peak_image_dt_ms": 33.339999999999996,
+        "peak_group": 2217
+      },
+      {
+        "camera": 2,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.299,
+          "median": 33.333,
+          "p95": 33.346,
+          "max": 33.372
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.044883,
+        "peak_selected_index": 44,
+        "peak_image_dt_ms": 33.339999999999996,
+        "peak_group": 2217
+      },
+      {
+        "camera": 3,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.298,
+          "median": 33.333,
+          "p95": 33.35,
+          "max": 33.376
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.044884,
+        "peak_selected_index": 44,
+        "peak_image_dt_ms": 33.346,
+        "peak_group": 2217
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "halo851_155811": {
+    "frames": 491,
+    "dt_ms": {
+      "min": 33.282,
+      "median": 33.3335,
+      "p95": 33.35,
+      "max": 33.373
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 228,
+      "frame": 229,
+      "time_s": 7.600005500000001,
+      "speed_mps": 1.2862896946472013,
+      "step_m": 0.042899690751026134,
+      "dt_ms": 33.3515,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 3.3710325369611382,
+      "history_fetch_ms": 0.00033993273973464966
+    },
+    "imu_interval": {
+      "count": 490,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 18,
+      "solves": 2,
+      "commits": 2,
+      "rejected": 16,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 19,
+      "max_position_mismatch_m": 1.72010004e-07,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 9
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 276,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.282,
+          "median": 33.333,
+          "p95": 33.370999999999995,
+          "max": 33.385
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.348232,
+        "peak_selected_index": 229,
+        "peak_image_dt_ms": 33.3,
+        "peak_group": 2897
+      },
+      {
+        "camera": 1,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.283,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.376
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.075277,
+        "peak_selected_index": 229,
+        "peak_image_dt_ms": 33.348,
+        "peak_group": 2897
+      },
+      {
+        "camera": 2,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.275,
+          "median": 33.333,
+          "p95": 33.35,
+          "max": 33.382999999999996
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.045383,
+        "peak_selected_index": 229,
+        "peak_image_dt_ms": 33.35,
+        "peak_group": 2897
+      },
+      {
+        "camera": 3,
+        "frames": 493,
+        "dt_ms": {
+          "min": 33.289,
+          "median": 33.333,
+          "p95": 33.351,
+          "max": 33.367
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.045384,
+        "peak_selected_index": 229,
+        "peak_image_dt_ms": 33.353,
+        "peak_group": 2897
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "halo851_170302": {
+    "frames": 6414,
+    "dt_ms": {
+      "min": 33.123,
+      "median": 33.3335,
+      "p95": 33.3812,
+      "max": 166.7115
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 57,
+    "peak": {
+      "index": 1725,
+      "frame": 1726,
+      "time_s": 57.866685000000004,
+      "speed_mps": 1.3897659361123322,
+      "step_m": 0.0463167293528157,
+      "dt_ms": 33.327000000000005,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 38.3493909612298,
+      "history_fetch_ms": 0.0003079185262322426
+    },
+    "imu_interval": {
+      "count": 6404,
+      "unhealthy": 0,
+      "max_error_ns": 15.000000019860238,
+      "timestamp_duration_mismatch_ns": 6.0
+    },
+    "window": {
+      "attempts": 110,
+      "solves": 30,
+      "commits": 30,
+      "rejected": 80,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 110,
+      "max_position_mismatch_m": 3.10859787e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 56
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 4773,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 6416,
+        "dt_ms": {
+          "min": 33.134,
+          "median": 33.333,
+          "p95": 33.385,
+          "max": 166.672
+        },
+        "estimated_missing_by_timestamp": 59,
+        "sync_group_gaps": 29,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.44823199999999996,
+        "peak_selected_index": 1726,
+        "peak_image_dt_ms": 33.324999999999996,
+        "peak_group": 1732
+      },
+      {
+        "camera": 1,
+        "frames": 6416,
+        "dt_ms": {
+          "min": 33.120999999999995,
+          "median": 33.333,
+          "p95": 33.381,
+          "max": 166.706
+        },
+        "estimated_missing_by_timestamp": 59,
+        "sync_group_gaps": 29,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.11777699999999999,
+        "peak_selected_index": 1726,
+        "peak_image_dt_ms": 33.327,
+        "peak_group": 1732
+      },
+      {
+        "camera": 2,
+        "frames": 6416,
+        "dt_ms": {
+          "min": 33.099,
+          "median": 33.333,
+          "p95": 33.393,
+          "max": 166.73399999999998
+        },
+        "estimated_missing_by_timestamp": 59,
+        "sync_group_gaps": 29,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.062883,
+        "peak_selected_index": 1726,
+        "peak_image_dt_ms": 33.327,
+        "peak_group": 1732
+      },
+      {
+        "camera": 3,
+        "frames": 6416,
+        "dt_ms": {
+          "min": 33.147,
+          "median": 33.333,
+          "p95": 33.376999999999995,
+          "max": 166.689
+        },
+        "estimated_missing_by_timestamp": 59,
+        "sync_group_gaps": 29,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.062884,
+        "peak_selected_index": 1726,
+        "peak_image_dt_ms": 33.327,
+        "peak_group": 1732
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "room1": {
+    "frames": 2821,
+    "dt_ms": {
+      "min": 48.641000000000005,
+      "median": 50.002,
+      "p95": 50.076,
+      "max": 51.45814000000001
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 1992,
+      "frame": 1992,
+      "time_s": 99.604064983,
+      "speed_mps": 2.4747697015333525,
+      "step_m": 0.1237434346160707,
+      "dt_ms": 50.002,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "slam_enabled": false,
+      "multi_camera_cross_frame": true,
+      "environment": {
+        "CUVSLAM_ONLINE_TEMPORAL": "1",
+        "CUVSLAM_CAM01_TEMPORAL": null,
+        "CUVSLAM_JOINT_VI": "1",
+        "CUVSLAM_JOINT_BACKEND": "window",
+        "CUVSLAM_WINDOW_SOLVER": "schur_fp64",
+        "CUVSLAM_WINDOW_SIZE": "4",
+        "CUVSLAM_METRIC_INIT": "1"
+      },
+      "expert_parameters": {
+        "sba.num_inertial_sba_frames": "10",
+        "sba.num_inertial_fixed_sba_frames": "5",
+        "sba.num_inertial_sba_iterations": "10",
+        "sba.inertial_robustifier_scale": "1.5"
+      },
+      "cameras": 2,
+      "camera_model": "native_fisheye",
+      "frames": 2821
+    },
+    "imu_interval": {
+      "count": 2816,
+      "unhealthy": 0,
+      "max_error_ns": 8.000000002728047,
+      "timestamp_duration_mismatch_ns": 2.0
+    },
+    "window": {
+      "attempts": 240,
+      "solves": 190,
+      "commits": 190,
+      "rejected": 50,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 240,
+      "max_position_mismatch_m": 1.19302388e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 50
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 2324
+  },
+  "room2": {
+    "frames": 2882,
+    "dt_ms": {
+      "min": 48.851386000000005,
+      "median": 50.002,
+      "p95": 50.060158,
+      "max": 51.205929000000005
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 2717,
+      "frame": 2717,
+      "time_s": 135.853943877,
+      "speed_mps": 1.7499254268856057,
+      "step_m": 0.08749977119513407,
+      "dt_ms": 50.002,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "slam_enabled": false,
+      "multi_camera_cross_frame": true,
+      "environment": {
+        "CUVSLAM_ONLINE_TEMPORAL": "1",
+        "CUVSLAM_CAM01_TEMPORAL": null,
+        "CUVSLAM_JOINT_VI": "1",
+        "CUVSLAM_JOINT_BACKEND": "window",
+        "CUVSLAM_WINDOW_SOLVER": "schur_fp64",
+        "CUVSLAM_WINDOW_SIZE": "4",
+        "CUVSLAM_METRIC_INIT": "1"
+      },
+      "expert_parameters": {
+        "sba.num_inertial_sba_frames": "10",
+        "sba.num_inertial_fixed_sba_frames": "5",
+        "sba.num_inertial_sba_iterations": "10",
+        "sba.inertial_robustifier_scale": "1.5"
+      },
+      "cameras": 2,
+      "camera_model": "native_fisheye",
+      "frames": 2882
+    },
+    "imu_interval": {
+      "count": 2875,
+      "unhealthy": 0,
+      "max_error_ns": 8.000000002728047,
+      "timestamp_duration_mismatch_ns": 2.0
+    },
+    "window": {
+      "attempts": 252,
+      "solves": 223,
+      "commits": 223,
+      "rejected": 29,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 251,
+      "max_position_mismatch_m": 1.11390545e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 29
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 2386
+  },
+  "room3": {
+    "frames": 2821,
+    "dt_ms": {
+      "min": 48.65028,
+      "median": 50.002,
+      "p95": 50.05800000000001,
+      "max": 51.435333
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 121,
+      "frame": 121,
+      "time_s": 6.050532369000001,
+      "speed_mps": 1.583871106298903,
+      "step_m": 0.07907159723976014,
+      "dt_ms": 49.923,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "slam_enabled": false,
+      "multi_camera_cross_frame": true,
+      "environment": {
+        "CUVSLAM_ONLINE_TEMPORAL": "1",
+        "CUVSLAM_CAM01_TEMPORAL": null,
+        "CUVSLAM_JOINT_VI": "1",
+        "CUVSLAM_JOINT_BACKEND": "window",
+        "CUVSLAM_WINDOW_SOLVER": "schur_fp64",
+        "CUVSLAM_WINDOW_SIZE": "4",
+        "CUVSLAM_METRIC_INIT": "1"
+      },
+      "expert_parameters": {
+        "sba.num_inertial_sba_frames": "10",
+        "sba.num_inertial_fixed_sba_frames": "5",
+        "sba.num_inertial_sba_iterations": "10",
+        "sba.inertial_robustifier_scale": "1.5"
+      },
+      "cameras": 2,
+      "camera_model": "native_fisheye",
+      "frames": 2821
+    },
+    "imu_interval": {
+      "count": 2818,
+      "unhealthy": 0,
+      "max_error_ns": 8.000000002728047,
+      "timestamp_duration_mismatch_ns": 2.0
+    },
+    "window": {
+      "attempts": 274,
+      "solves": 170,
+      "commits": 170,
+      "rejected": 104,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 273,
+      "max_position_mismatch_m": 1.70473447e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 102
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 2300
+  },
+  "room4": {
+    "frames": 2227,
+    "dt_ms": {
+      "min": 48.306702,
+      "median": 50.002,
+      "p95": 50.081934000000004,
+      "max": 51.727965
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 1973,
+      "frame": 1973,
+      "time_s": 98.65289731600001,
+      "speed_mps": 1.6905484051596684,
+      "step_m": 0.08453080135479375,
+      "dt_ms": 50.002,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "slam_enabled": false,
+      "multi_camera_cross_frame": true,
+      "environment": {
+        "CUVSLAM_ONLINE_TEMPORAL": "1",
+        "CUVSLAM_CAM01_TEMPORAL": null,
+        "CUVSLAM_JOINT_VI": "1",
+        "CUVSLAM_JOINT_BACKEND": "window",
+        "CUVSLAM_WINDOW_SOLVER": "schur_fp64",
+        "CUVSLAM_WINDOW_SIZE": "4",
+        "CUVSLAM_METRIC_INIT": "1"
+      },
+      "expert_parameters": {
+        "sba.num_inertial_sba_frames": "10",
+        "sba.num_inertial_fixed_sba_frames": "5",
+        "sba.num_inertial_sba_iterations": "10",
+        "sba.inertial_robustifier_scale": "1.5"
+      },
+      "cameras": 2,
+      "camera_model": "native_fisheye",
+      "frames": 2227
+    },
+    "imu_interval": {
+      "count": 2224,
+      "unhealthy": 0,
+      "max_error_ns": 8.000000002728047,
+      "timestamp_duration_mismatch_ns": 2.0
+    },
+    "window": {
+      "attempts": 158,
+      "solves": 114,
+      "commits": 114,
+      "rejected": 44,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 159,
+      "max_position_mismatch_m": 1.0254771e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 42
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 1794
+  },
+  "room5": {
+    "frames": 2846,
+    "dt_ms": {
+      "min": 48.505982,
+      "median": 50.002,
+      "p95": 50.085800000000006,
+      "max": 51.34528
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 2079,
+      "frame": 2079,
+      "time_s": 103.95345763200001,
+      "speed_mps": 2.662784067794171,
+      "step_m": 0.13314452895784415,
+      "dt_ms": 50.002,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "slam_enabled": false,
+      "multi_camera_cross_frame": true,
+      "environment": {
+        "CUVSLAM_ONLINE_TEMPORAL": "1",
+        "CUVSLAM_CAM01_TEMPORAL": null,
+        "CUVSLAM_JOINT_VI": "1",
+        "CUVSLAM_JOINT_BACKEND": "window",
+        "CUVSLAM_WINDOW_SOLVER": "schur_fp64",
+        "CUVSLAM_WINDOW_SIZE": "4",
+        "CUVSLAM_METRIC_INIT": "1"
+      },
+      "expert_parameters": {
+        "sba.num_inertial_sba_frames": "10",
+        "sba.num_inertial_fixed_sba_frames": "5",
+        "sba.num_inertial_sba_iterations": "10",
+        "sba.inertial_robustifier_scale": "1.5"
+      },
+      "cameras": 2,
+      "camera_model": "native_fisheye",
+      "frames": 2846
+    },
+    "imu_interval": {
+      "count": 2839,
+      "unhealthy": 0,
+      "max_error_ns": 8.000000002728047,
+      "timestamp_duration_mismatch_ns": 2.0
+    },
+    "window": {
+      "attempts": 274,
+      "solves": 164,
+      "commits": 164,
+      "rejected": 110,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 274,
+      "max_position_mismatch_m": 9.63057801e-07,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 108
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 2381
+  },
+  "room6": {
+    "frames": 2636,
+    "dt_ms": {
+      "min": 49.063333,
+      "median": 50.002,
+      "p95": 50.054908600000005,
+      "max": 50.902474000000005
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 2424,
+      "frame": 2424,
+      "time_s": 121.20359268400001,
+      "speed_mps": 1.107158784518724,
+      "step_m": 0.05535904638472073,
+      "dt_ms": 50.001000000000005,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "slam_enabled": false,
+      "multi_camera_cross_frame": true,
+      "environment": {
+        "CUVSLAM_ONLINE_TEMPORAL": "1",
+        "CUVSLAM_CAM01_TEMPORAL": null,
+        "CUVSLAM_JOINT_VI": "1",
+        "CUVSLAM_JOINT_BACKEND": "window",
+        "CUVSLAM_WINDOW_SOLVER": "schur_fp64",
+        "CUVSLAM_WINDOW_SIZE": "4",
+        "CUVSLAM_METRIC_INIT": "1"
+      },
+      "expert_parameters": {
+        "sba.num_inertial_sba_frames": "10",
+        "sba.num_inertial_fixed_sba_frames": "5",
+        "sba.num_inertial_sba_iterations": "10",
+        "sba.inertial_robustifier_scale": "1.5"
+      },
+      "cameras": 2,
+      "camera_model": "native_fisheye",
+      "frames": 2636
+    },
+    "imu_interval": {
+      "count": 2631,
+      "unhealthy": 0,
+      "max_error_ns": 8.000000002728047,
+      "timestamp_duration_mismatch_ns": 2.0
+    },
+    "window": {
+      "attempts": 81,
+      "solves": 75,
+      "commits": 75,
+      "rejected": 6,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 81,
+      "max_position_mismatch_m": 1.31081526e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 5
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 1961
+  },
+  "test_162436": {
+    "frames": 1798,
+    "dt_ms": {
+      "min": 33.115,
+      "median": 33.3335,
+      "p95": 33.348000000000006,
+      "max": 33.5625
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 1058,
+      "frame": 1059,
+      "time_s": 35.2666495,
+      "speed_mps": 1.2280144117780936,
+      "step_m": 0.04091744020044608,
+      "dt_ms": 33.32,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 12.144798412919044,
+      "history_fetch_ms": 0.00036496203392744064
+    },
+    "imu_interval": {
+      "count": 1794,
+      "unhealthy": 0,
+      "max_error_ns": 7.999999995789153,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 60,
+      "solves": 9,
+      "commits": 9,
+      "rejected": 51,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 71,
+      "max_position_mismatch_m": 4.95786537e-07,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 38
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 1229,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 1800,
+        "dt_ms": {
+          "min": 33.117999999999995,
+          "median": 33.333,
+          "p95": 33.370999999999995,
+          "max": 33.551
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 2.439105,
+        "peak_selected_index": 1059,
+        "peak_image_dt_ms": 33.367999999999995,
+        "peak_group": 94661
+      },
+      {
+        "camera": 1,
+        "frames": 1800,
+        "dt_ms": {
+          "min": 33.117,
+          "median": 33.333,
+          "p95": 33.348,
+          "max": 33.562
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.793908,
+        "peak_selected_index": 1059,
+        "peak_image_dt_ms": 33.323,
+        "peak_group": 94661
+      },
+      {
+        "camera": 2,
+        "frames": 1800,
+        "dt_ms": {
+          "min": 33.111,
+          "median": 33.333,
+          "p95": 33.35,
+          "max": 33.568
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 1.259596,
+        "peak_selected_index": 1059,
+        "peak_image_dt_ms": 33.321999999999996,
+        "peak_group": 94661
+      },
+      {
+        "camera": 3,
+        "frames": 1800,
+        "dt_ms": {
+          "min": 33.119,
+          "median": 33.333,
+          "p95": 33.35,
+          "max": 33.556999999999995
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 1.259596,
+        "peak_selected_index": 1059,
+        "peak_image_dt_ms": 33.318,
+        "peak_group": 94661
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "test_180123": {
+    "frames": 1644,
+    "dt_ms": {
+      "min": 33.26650000000001,
+      "median": 33.3335,
+      "p95": 33.347,
+      "max": 33.411
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 385,
+      "frame": 386,
+      "time_s": 12.833342,
+      "speed_mps": 1.7669271552913317,
+      "step_m": 0.05891200174814594,
+      "dt_ms": 33.3415,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 32.911768765188754,
+      "history_fetch_ms": 0.00035797711461782455
+    },
+    "imu_interval": {
+      "count": 1641,
+      "unhealthy": 0,
+      "max_error_ns": 6.999999996315509,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 71,
+      "solves": 12,
+      "commits": 12,
+      "rejected": 59,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 72,
+      "max_position_mismatch_m": 2.89312857e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 46
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 1194,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 1646,
+        "dt_ms": {
+          "min": 33.242,
+          "median": 33.333,
+          "p95": 33.373,
+          "max": 33.454
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 2.4461049999999998,
+        "peak_selected_index": 386,
+        "peak_image_dt_ms": 33.336,
+        "peak_group": 77942
+      },
+      {
+        "camera": 1,
+        "frames": 1646,
+        "dt_ms": {
+          "min": 33.266999999999996,
+          "median": 33.333,
+          "p95": 33.3458,
+          "max": 33.408
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.793908,
+        "peak_selected_index": 386,
+        "peak_image_dt_ms": 33.341,
+        "peak_group": 77942
+      },
+      {
+        "camera": 2,
+        "frames": 1646,
+        "dt_ms": {
+          "min": 33.263,
+          "median": 33.333,
+          "p95": 33.3468,
+          "max": 33.409
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 1.260596,
+        "peak_selected_index": 386,
+        "peak_image_dt_ms": 33.342999999999996,
+        "peak_group": 77942
+      },
+      {
+        "camera": 3,
+        "frames": 1646,
+        "dt_ms": {
+          "min": 33.266,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.42
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 1.260596,
+        "peak_selected_index": 386,
+        "peak_image_dt_ms": 33.339999999999996,
+        "peak_group": 77942
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "validation_195610": {
+    "frames": 1175,
+    "dt_ms": {
+      "min": 33.2705,
+      "median": 33.3335,
+      "p95": 33.347500000000004,
+      "max": 33.388
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 73,
+      "frame": 74,
+      "time_s": 2.433345,
+      "speed_mps": 1.7468026883779193,
+      "step_m": 0.05822006020229187,
+      "dt_ms": 33.3295,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 7.315955008380115,
+      "history_fetch_ms": 0.00047998037189245224
+    },
+    "imu_interval": {
+      "count": 1171,
+      "unhealthy": 0,
+      "max_error_ns": 7.000000003254403,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 73,
+      "solves": 3,
+      "commits": 3,
+      "rejected": 70,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 73,
+      "max_position_mismatch_m": 2.17883303e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 41
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 903,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 1177,
+        "dt_ms": {
+          "min": 33.256,
+          "median": 33.333,
+          "p95": 33.373,
+          "max": 33.406
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.13661399999999999,
+        "peak_selected_index": 74,
+        "peak_image_dt_ms": 33.333,
+        "peak_group": 75
+      },
+      {
+        "camera": 1,
+        "frames": 1177,
+        "dt_ms": {
+          "min": 33.271,
+          "median": 33.333,
+          "p95": 33.347,
+          "max": 33.387
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.28127599999999997,
+        "peak_selected_index": 74,
+        "peak_image_dt_ms": 33.33,
+        "peak_group": 75
+      },
+      {
+        "camera": 2,
+        "frames": 1177,
+        "dt_ms": {
+          "min": 33.265,
+          "median": 33.333,
+          "p95": 33.348,
+          "max": 33.393
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.16152,
+        "peak_selected_index": 74,
+        "peak_image_dt_ms": 33.327999999999996,
+        "peak_group": 75
+      },
+      {
+        "camera": 3,
+        "frames": 1177,
+        "dt_ms": {
+          "min": 33.275999999999996,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.382999999999996
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.16152,
+        "peak_selected_index": 74,
+        "peak_image_dt_ms": 33.330999999999996,
+        "peak_group": 75
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "validation_200730": {
+    "frames": 801,
+    "dt_ms": {
+      "min": 33.298500000000004,
+      "median": 33.3335,
+      "p95": 33.3465,
+      "max": 33.365
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 126,
+      "frame": 127,
+      "time_s": 4.1999845,
+      "speed_mps": 1.2650421159813618,
+      "step_m": 0.042149938262382995,
+      "dt_ms": 33.319,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 5.017980933189392,
+      "history_fetch_ms": 0.0005010515451431274
+    },
+    "imu_interval": {
+      "count": 799,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 11,
+      "solves": 0,
+      "commits": 0,
+      "rejected": 11,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 11,
+      "max_position_mismatch_m": 3.42402609e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 11
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 561,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 803,
+        "dt_ms": {
+          "min": 33.275,
+          "median": 33.333,
+          "p95": 33.37195,
+          "max": 33.382999999999996
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.13411399999999998,
+        "peak_selected_index": 127,
+        "peak_image_dt_ms": 33.369,
+        "peak_group": 1308
+      },
+      {
+        "camera": 1,
+        "frames": 803,
+        "dt_ms": {
+          "min": 33.299,
+          "median": 33.333,
+          "p95": 33.345,
+          "max": 33.365
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.27827599999999997,
+        "peak_selected_index": 127,
+        "peak_image_dt_ms": 33.321,
+        "peak_group": 1308
+      },
+      {
+        "camera": 2,
+        "frames": 803,
+        "dt_ms": {
+          "min": 33.294,
+          "median": 33.333,
+          "p95": 33.346,
+          "max": 33.367999999999995
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.15952,
+        "peak_selected_index": 127,
+        "peak_image_dt_ms": 33.321,
+        "peak_group": 1308
+      },
+      {
+        "camera": 3,
+        "frames": 803,
+        "dt_ms": {
+          "min": 33.295,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.372
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.15952,
+        "peak_selected_index": 127,
+        "peak_image_dt_ms": 33.317,
+        "peak_group": 1308
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "validation_201148": {
+    "frames": 2598,
+    "dt_ms": {
+      "min": 33.304,
+      "median": 33.3335,
+      "p95": 33.346000000000004,
+      "max": 33.3675
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 1408,
+      "frame": 1409,
+      "time_s": 46.9333475,
+      "speed_mps": 3.647882603600816,
+      "step_m": 0.1215893990019206,
+      "dt_ms": 33.3315,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 16.508094035089016,
+      "history_fetch_ms": 0.00034098047763109207
+    },
+    "imu_interval": {
+      "count": 2592,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 26,
+      "solves": 1,
+      "commits": 1,
+      "rejected": 25,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 26,
+      "max_position_mismatch_m": 3.54434701e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 16
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 1040,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 2600,
+        "dt_ms": {
+          "min": 33.254999999999995,
+          "median": 33.333,
+          "p95": 33.370999999999995,
+          "max": 33.411
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.130114,
+        "peak_selected_index": 1409,
+        "peak_image_dt_ms": 33.333,
+        "peak_group": 3396
+      },
+      {
+        "camera": 1,
+        "frames": 2600,
+        "dt_ms": {
+          "min": 33.303,
+          "median": 33.333,
+          "p95": 33.345,
+          "max": 33.372
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.312776,
+        "peak_selected_index": 1409,
+        "peak_image_dt_ms": 33.332,
+        "peak_group": 3396
+      },
+      {
+        "camera": 2,
+        "frames": 2600,
+        "dt_ms": {
+          "min": 33.301,
+          "median": 33.333,
+          "p95": 33.346,
+          "max": 33.370999999999995
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.17251999999999998,
+        "peak_selected_index": 1409,
+        "peak_image_dt_ms": 33.330999999999996,
+        "peak_group": 3396
+      },
+      {
+        "camera": 3,
+        "frames": 2600,
+        "dt_ms": {
+          "min": 33.266999999999996,
+          "median": 33.333,
+          "p95": 33.348099999999995,
+          "max": 33.408
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.17251999999999998,
+        "peak_selected_index": 1409,
+        "peak_image_dt_ms": 33.332,
+        "peak_group": 3396
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "validation_202341": {
+    "frames": 1267,
+    "dt_ms": {
+      "min": 33.2995,
+      "median": 33.3335,
+      "p95": 33.346875,
+      "max": 33.374
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 458,
+      "frame": 459,
+      "time_s": 15.2666795,
+      "speed_mps": 1.4456814216999763,
+      "step_m": 0.04820190996232061,
+      "dt_ms": 33.342000000000006,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 8.627387345768511,
+      "history_fetch_ms": 0.0004019821062684059
+    },
+    "imu_interval": {
+      "count": 1265,
+      "unhealthy": 0,
+      "max_error_ns": 4.0000000048334705,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 18,
+      "solves": 2,
+      "commits": 2,
+      "rejected": 16,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 18,
+      "max_position_mismatch_m": 3.31556703e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 15
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 806,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.265,
+          "median": 33.333,
+          "p95": 33.372,
+          "max": 33.394
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.13611399999999999,
+        "peak_selected_index": 459,
+        "peak_image_dt_ms": 33.29,
+        "peak_group": 5049
+      },
+      {
+        "camera": 1,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.301,
+          "median": 33.333,
+          "p95": 33.345,
+          "max": 33.373
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.28077599999999997,
+        "peak_selected_index": 459,
+        "peak_image_dt_ms": 33.339999999999996,
+        "peak_group": 5049
+      },
+      {
+        "camera": 2,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.295,
+          "median": 33.333,
+          "p95": 33.345,
+          "max": 33.378
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.16002,
+        "peak_selected_index": 459,
+        "peak_image_dt_ms": 33.339,
+        "peak_group": 5049
+      },
+      {
+        "camera": 3,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.295,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.372
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.16002,
+        "peak_selected_index": 459,
+        "peak_image_dt_ms": 33.345,
+        "peak_group": 5049
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  },
+  "validation_203017": {
+    "frames": 1267,
+    "dt_ms": {
+      "min": 33.2845,
+      "median": 33.3335,
+      "p95": 33.347,
+      "max": 33.374
+    },
+    "nonpositive_dt": 0,
+    "estimated_missing_output_intervals": 0,
+    "peak": {
+      "index": 890,
+      "frame": 891,
+      "time_s": 29.6666835,
+      "speed_mps": 1.5262692965230984,
+      "step_m": 0.05087666073030096,
+      "dt_ms": 33.334,
+      "source_index_delta": 1
+    },
+    "backend": {
+      "version": "17.0.1+9572835-modified",
+      "enabled": false,
+      "synchronous": false,
+      "history_frames": 0,
+      "lc": 0,
+      "pgo": 0,
+      "graph_nodes_edges_max": [
+        0,
+        0
+      ],
+      "diagnostics_ms": 8.536327863112092,
+      "history_fetch_ms": 0.00030105002224445343
+    },
+    "imu_interval": {
+      "count": 1264,
+      "unhealthy": 0,
+      "max_error_ns": 8.000000002728047,
+      "timestamp_duration_mismatch_ns": 2.0000000037252903
+    },
+    "window": {
+      "attempts": 19,
+      "solves": 4,
+      "commits": 4,
+      "rejected": 15,
+      "commit_without_accepted_solve": [],
+      "rejected_but_committed": [],
+      "commit_consistency_checks": 19,
+      "max_position_mismatch_m": 3.02049148e-06,
+      "max_velocity_mismatch_mps": 0.0,
+      "transaction_reject_reasons": {
+        "map_support": 12
+      },
+      "publication_commit_failures": 0,
+      "external_map_window_resets": 0
+    },
+    "state_audit_frames": 418,
+    "raw_cameras": [
+      {
+        "camera": 0,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.28,
+          "median": 33.333,
+          "p95": 33.372,
+          "max": 33.388
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.13311399999999998,
+        "peak_selected_index": 891,
+        "peak_image_dt_ms": 33.333999999999996,
+        "peak_group": 6753
+      },
+      {
+        "camera": 1,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.283,
+          "median": 33.333,
+          "p95": 33.346,
+          "max": 33.376999999999995
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.27927599999999997,
+        "peak_selected_index": 891,
+        "peak_image_dt_ms": 33.335,
+        "peak_group": 6753
+      },
+      {
+        "camera": 2,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.282,
+          "median": 33.333,
+          "p95": 33.347,
+          "max": 33.373999999999995
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.16002,
+        "peak_selected_index": 891,
+        "peak_image_dt_ms": 33.333,
+        "peak_group": 6753
+      },
+      {
+        "camera": 3,
+        "frames": 1269,
+        "dt_ms": {
+          "min": 33.287,
+          "median": 33.333,
+          "p95": 33.349,
+          "max": 33.375
+        },
+        "estimated_missing_by_timestamp": 0,
+        "sync_group_gaps": 0,
+        "duplicate_selected_images": 0,
+        "max_selected_time_residual_ms": 0.16002,
+        "peak_selected_index": 891,
+        "peak_image_dt_ms": 33.335,
+        "peak_group": 6753
+      }
+    ],
+    "selected_hardware_group_mismatches": 0,
+    "mismatch_examples": [],
+    "selected_timestamp_exact": true
+  }
+}

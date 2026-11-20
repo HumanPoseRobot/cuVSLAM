@@ -15,13 +15,17 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
-#include <memory>
 #include <cstdlib>
+#include <limits>
+#include <memory>
+#include <stdexcept>
 
 #include "common/isometry_utils.h"
+#include "sof/internal/calibrated_patch_warp.h"
+#include "sof/internal/calibrated_stereo_geometry.h"
 #include "sof/internal/sof_multicamera_gpu.h"
-#include "sof/sof_create.h"
 #include "sof/internal/stereo_mask.h"
+#include "sof/sof_create.h"
 
 namespace cuvslam::sof {
 
@@ -68,8 +72,8 @@ MultiSOFGPU::MultiSOFGPU(const camera::Rig& rig, const camera::FrustumIntersecti
 }
 
 void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId secondary_id,
-                                                   const Sources& curr_sources, Images& curr_images,
-                                                   const Sources&, const std::vector<camera::Observation>& primary_obs,
+                                                   const Sources& curr_sources, Images& curr_images, const Sources&,
+                                                   const std::vector<camera::Observation>& primary_obs,
                                                    std::vector<camera::Observation>* /* secondary_obs */) {
   const ImageContextPtr primary_image = curr_images[primary_id];
   const ImageSource& secondary_source = curr_sources[secondary_id];
@@ -83,6 +87,18 @@ void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
   GPUArrayPinned<TrackData>& tracks_data = tracker.tracks_data;
   Stream& stream = tracker.stream;
 
+  // Grow all peer buffers before writing host observations. copy_top_n checks
+  // its range too late to protect these host writes in a release build.
+  if (primary_obs.size() > size_t(std::numeric_limits<int>::max())) {
+    throw std::length_error("stereo observation index exceeds int range");
+  }
+  if (primary_obs.size() > tracks_data.size()) {
+    CUDA_CHECK(cudaStreamSynchronize(stream.get_stream()));
+    tracks_data.resize(primary_obs.size());
+    tracker.calibrated_tracks.resize(primary_obs.size());
+    tracker.calibrated_indices.resize(primary_obs.size());
+  }
+
   const Isometry3T secondary_from_primary =
       rig_.camera_from_rig[secondary_id] * rig_.camera_from_rig[primary_id].inverse();
 
@@ -90,6 +106,14 @@ void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
   const float avg_focal = 0.5f * (intrinsicsS.getFocal().x() + intrinsicsS.getFocal().y());
   const float cross_cam_search_radius = std::max(20.f, baseline * avg_focal * 2.f);
 
+  // Choose the rotation-aware model from the calibrated CAMERA basis before
+  // differentiating the fisheye projection. A noisy/undefined local inverse
+  // near the image horizon is not evidence that parallel camera axes reversed.
+  const Matrix2T camera_axes = secondary_from_primary.linear().topLeftCorner<2, 2>();
+  const bool calibrated = std::getenv("VIO_STEREO_PATCH_WARP") &&
+                          (!std::getenv("VIO_STEREO_LK_ORIENTATION_ONLY") || !TranslationPatchCompatible(camera_axes));
+  tracker.calibrated_count = 0;
+  tracker.calibrated_lookup.assign(primary_obs.size(), -1);
   for (size_t i = 0; i < primary_obs.size(); i++) {
     const camera::Observation& trackL = primary_obs[i];
     const Vector2T& xyL = trackL.xy;
@@ -98,6 +122,7 @@ void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
     data.track = {0.f, 0.f};
     data.offset = {0.f, 0.f};
     data.track_status = false;
+    data.initial_guess_map = {1, 0, 0, 1};
     data.search_radius_px = -1.f;
     data.ncc_threshold = 0.8f;
     Vector2T uvL;
@@ -122,21 +147,58 @@ void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
     const Vector2T offset = uvR_init - uvL;
     data.offset = {offset.x(), offset.y()};
     data.search_radius_px = cross_cam_search_radius;
+    if (calibrated) {
+      Matrix2T patch_map;
+      if (!CalibratedPatchWarp(intrinsicsP, intrinsicsS, secondary_from_primary.linear(), uvL, patch_map)) {
+        data.search_radius_px = -1.f;
+        continue;
+      }
+      if (PatchWarpRequired(patch_map)) {
+        const size_t index = tracker.calibrated_count++;
+        tracker.calibrated_lookup[i] = static_cast<int>(index);
+        tracker.calibrated_indices[index] = static_cast<int>(i);
+        auto& warped = tracker.calibrated_tracks[index];
+        warped = data;
+        warped.initial_guess_map = {patch_map(0, 0), patch_map(0, 1), patch_map(1, 0), patch_map(1, 1)};
+        if (!std::getenv("VIO_STEREO_PATCH_VALIDATE")) {
+          data.search_radius_px = -1.f;  // Full-replacement diagnostic only.
+        }
+      }
+    }
   }
 
   tracks_data.copy_top_n(ToGPU, primary_obs.size(), stream.get_stream());
 
   secondary_image->build_gpu_image_pyramid(secondary_source, box_prefilter_, stream.get_stream());
-  secondary_image->build_gpu_gradient_pyramid(true, stream.get_stream());
+  secondary_image->build_gpu_gradient_pyramid(tracker.calibrated_count == 0, stream.get_stream());
 
   tracker.tracker->track_points(primary_image->gpu_gradient_pyramid(), secondary_image->gpu_gradient_pyramid(),
                                 primary_image->gpu_image_pyramid(), secondary_image->gpu_image_pyramid(), tracks_data,
                                 primary_obs.size(), stream.get_stream());
   tracks_data.copy_top_n(ToCPU, primary_obs.size(), stream.get_stream());
+  if (tracker.calibrated_count > 0) {
+    tracker.calibrated_tracks.copy_top_n(ToGPU, tracker.calibrated_count, stream.get_stream());
+    if (std::getenv("VIO_STEREO_PATCH_VALIDATE")) {
+      tracker.calibrated_indices.copy_top_n(ToGPU, tracker.calibrated_count, stream.get_stream());
+      const auto& source = primary_image->gpu_image_pyramid()[0];
+      const auto& target = secondary_image->gpu_image_pyramid()[0];
+      CUDA_CHECK(calibrated_patch_check(source.get_texture_filter_linear(), target.get_texture_filter_linear(),
+                                        {int(source.cols()), int(source.rows())},
+                                        {int(target.cols()), int(target.rows())}, tracks_data.ptr(),
+                                        tracker.calibrated_tracks.ptr(), tracker.calibrated_indices.ptr(),
+                                        int(tracker.calibrated_count), stream.get_stream()));
+    }
+    tracker.calibrated_tracker.track_points(primary_image->gpu_gradient_pyramid(),
+                                            secondary_image->gpu_gradient_pyramid(), primary_image->gpu_image_pyramid(),
+                                            secondary_image->gpu_image_pyramid(), tracker.calibrated_tracks,
+                                            tracker.calibrated_count, stream.get_stream());
+    tracker.calibrated_tracks.copy_top_n(ToCPU, tracker.calibrated_count, stream.get_stream());
+  }
   tracker.was_launched = true;
 }
 
-void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations, const Sources& masks_sources, const Images& images) {
+void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations, const Sources& masks_sources,
+                                     const Images& images) {
   std::vector<std::vector<camera::Observation>> secondary_observations(observations.size());
   const auto& primary_cams = fid_.primary_cameras();
 
@@ -168,13 +230,29 @@ void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations, const S
       // FIXME: tracks_data.size() should return data size and not capacity, fix GPUArray[Pinned] and get rid of
       // obs_sizes
       for (size_t i = 0; i < primary_obs.size(); i++) {
-        auto& data = tracks_data[i];
+        const int calibrated_index = i < tracker.calibrated_lookup.size() ? tracker.calibrated_lookup[i] : -1;
+        const bool use_calibrated =
+            calibrated_index >= 0 && tracker.calibrated_tracks[calibrated_index].cache_index != -2;
+        auto& data = use_calibrated ? tracker.calibrated_tracks[calibrated_index] : tracks_data[i];
+        // Diagnostic separation: retain a calibrated-NCC-verified ORIGINAL
+        // observation, but never introduce a newly searched observation.
+        if (use_calibrated && std::getenv("VIO_STEREO_VERIFY_ONLY")) {
+          continue;
+        }
         const TrackId& trackId = primary_obs[i].id;
         if (data.track_status) {
           uvR << data.track.x, data.track.y;
           info << data.info[0], data.info[1], data.info[2], data.info[3];
           Matrix2T info_xy;
           if (target.accepts(uvR) && camera::TryObservationInfoUVToXY(intrinsicsS, uvR, info, xyR, info_xy)) {
+            if (use_calibrated && std::getenv("VIO_STEREO_RETRY_GEOMETRY")) {
+              const Isometry3T secondary_from_primary =
+                  rig_.camera_from_rig[secondary_id] * rig_.camera_from_rig[primary_id].inverse();
+              if (!ConsistentCalibratedStereo(secondary_from_primary, primary_obs[i].xy, primary_obs[i].xy_info, xyR,
+                                              info_xy)) {
+                continue;
+              }
+            }
             secondary_observations[secondary_id].emplace_back(secondary_id, trackId, xyR, info_xy);
           }
         }

@@ -130,6 +130,23 @@ void UnifiedMap::get_recent_landmarks(Map<TrackId, Vector3T>& out) const {
   }
 }
 
+void UnifiedMap::get_observed_landmarks(const std::vector<camera::Observation>& observations,
+                                         Map<TrackId, Vector3T>& out) const {
+  std::lock_guard<std::mutex> lock(map_mutex_);
+  out.clear(); out.reserve(observations.size());
+  for (const auto& obs : observations) {
+    if (out.count(obs.id)) continue;
+    auto owners=keyframes_from_landmark_.find(obs.id);
+    if (owners==keyframes_from_landmark_.end() || owners->second.empty()) continue;
+    const auto frame=landmarks_from_keyframe_.find(*owners->second.begin());
+    if (frame==landmarks_from_keyframe_.end()) continue;
+    const auto lm=frame->second.find(obs.id);
+    if (lm==frame->second.end() || !lm->second.landmark) continue;
+    const auto& pose=lm->second.landmark->get_pose();
+    if(pose && pose->allFinite()) out.emplace(obs.id,*pose);
+  }
+}
+
 TrackIdMap UnifiedMap::get_recent_landmarks(CameraId cam_id) const {
   TrackIdMap out;
   get_recent_landmarks(cam_id, out);
@@ -254,6 +271,7 @@ std::optional<Vector3T> UnifiedMap::get_gravity() const {
 size_t UnifiedMap::capacity() const { return capacity_; }
 
 void UnifiedMap::clear() {
+  TraceMessage("VIO_MAP_CLEAR keyframes=%zu",size());
   std::scoped_lock lock(map_mutex_, gravity_mutex_);
 
   gravity_ = std::nullopt;

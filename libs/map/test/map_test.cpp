@@ -80,3 +80,21 @@ TEST(Map, AddKeyframe) {
 }
 
 }  // namespace test::math
+
+TEST(MapObservedLandmarks, FindsLiveOlderOwnerAndDoesNotResurrectAfterClear) {
+ using namespace cuvslam;
+ map::UnifiedMap map(4);
+ std::vector<camera::Observation> first{{0,101,Vector2T::Zero(),Matrix2T::Identity()}};
+ std::vector<camera::Observation> second{{0,202,Vector2T::Zero(),Matrix2T::Identity()}};
+ map.add_keyframe(0,{}, {},first,{{101,Vector3T(1,2,3)}});
+ map.add_keyframe(1000000000,{}, {},second,{{202,Vector3T(4,5,6)}});
+ map::Map<TrackId,Vector3T> recent,observed;
+ map.get_recent_landmarks(recent);
+ EXPECT_EQ(recent.count(101),0);
+ map.get_observed_landmarks(first,observed);
+ ASSERT_EQ(observed.count(101),1);
+ EXPECT_TRUE(observed.at(101).isApprox(Vector3T(1,2,3)));
+ map.clear();
+ map.get_observed_landmarks(first,observed);
+ EXPECT_TRUE(observed.empty());
+}
