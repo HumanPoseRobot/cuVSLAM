@@ -1,0 +1,59 @@
+{
+  "confirmed_cache_defect": {
+    "same_latest_keyframe_timestamp": true,
+    "pose_matrix_difference": 0.0035134402569383383,
+    "camera_center_difference_m": 0.00014184766041580588,
+    "information_relative_difference": 0.023161176592111588,
+    "rotation_difference_deg": 0.14218076625970266,
+    "explicit_reset_pose_difference": 0,
+    "explicit_reset_information_difference": 0,
+    "cached_error_to_truth": 0.003513552248477936,
+    "fresh_error_to_truth": 3.068184696530807e-06
+  },
+  "coverage": {
+    "room1": {
+      "eligible_calls": 493,
+      "median_total_points": 443.0,
+      "median_uncertain_points": 407.0,
+      "median_fixed_fallback_fraction": 0.0092592592592593,
+      "maximum_fixed_fallback_fraction": 0.2145454545454546
+    },
+    "room2": {
+      "eligible_calls": 479,
+      "median_total_points": 412.0,
+      "median_uncertain_points": 396.0,
+      "median_fixed_fallback_fraction": 0.007407407407407418,
+      "maximum_fixed_fallback_fraction": 0.22592592592592597
+    },
+    "room3": {
+      "eligible_calls": 422,
+      "median_total_points": 428.0,
+      "median_uncertain_points": 404.5,
+      "median_fixed_fallback_fraction": 0.002645502645502673,
+      "maximum_fixed_fallback_fraction": 0.28727272727272724
+    },
+    "room4": {
+      "eligible_calls": 418,
+      "median_total_points": 470.0,
+      "median_uncertain_points": 416.5,
+      "median_fixed_fallback_fraction": 0.01666666666666672,
+      "maximum_fixed_fallback_fraction": 0.24120603015075381
+    },
+    "room5": {
+      "eligible_calls": 409,
+      "median_total_points": 426.0,
+      "median_uncertain_points": 395.0,
+      "median_fixed_fallback_fraction": 0.003816793893129722,
+      "maximum_fixed_fallback_fraction": 0.18840579710144922
+    },
+    "room6": {
+      "eligible_calls": 694,
+      "median_total_points": 395.0,
+      "median_uncertain_points": 363.5,
+      "median_fixed_fallback_fraction": 0.009662061239731123,
+      "maximum_fixed_fallback_fraction": 0.237410071942446
+    }
+  },
+  "scope": "Experimental geometry path only; default release configuration disabled; actual triggering in room2/room3 not yet established",
+  "not_proven": "No demonstrated sign/Schur/Jacobian error in checked paths; no causal claim that cache explains real room height drift"
+}

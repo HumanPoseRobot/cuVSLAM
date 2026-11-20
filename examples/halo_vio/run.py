@@ -76,7 +76,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-root', type=Path, required=True)
     parser.add_argument('--output-root', type=Path, required=True)
-    parser.add_argument('--version',action='version',version='runtime_reduced_v1.37')
+    parser.add_argument('--version',action='version',version='runtime_reduced_v1.37-rc1')
     parser.add_argument('--time-profile',help='Explicit validated timing profile name from time_profiles.json')
     parser.add_argument('--sequence', help='Recording prefix when data-root contains several recordings')
     parser.add_argument('--check-only', action='store_true')

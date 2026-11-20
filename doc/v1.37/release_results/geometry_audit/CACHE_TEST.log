@@ -1,0 +1,24 @@
+Note: Google Test filter = GeometryCacheAudit.*
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from GeometryCacheAudit
+[ RUN      ] GeometryCacheAudit.ExistingKeyframePoseCorrectionMustInvalidatePrior
+/nas/shared/baidx/cuvslam_runs/geometry_uncertainty_audit_20261120/cache_test.cpp:60: Failure
+Expected: (pose_difference) < (1e-6), actual: 0.0035134402569383383 vs 1e-06
+Same current map/input/initial pose must not depend on a stale prior cache
+
+/nas/shared/baidx/cuvslam_runs/geometry_uncertainty_audit_20261120/cache_test.cpp:61: Failure
+Expected: (info_relative) < (1e-5), actual: 0.023161176592111588 vs 1e-05
+
+
+[CUVSLAM_TEST_RETRY]	/tmp/geometry_uncertainty_audit_20261120/cache_test --gtest_filter=GeometryCacheAudit.ExistingKeyframePoseCorrectionMustInvalidatePrior --gtest_random_seed=69716
+[  FAILED  ] GeometryCacheAudit.ExistingKeyframePoseCorrectionMustInvalidatePrior (13 ms)
+[----------] 1 test from GeometryCacheAudit (13 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (13 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] GeometryCacheAudit.ExistingKeyframePoseCorrectionMustInvalidatePrior
+
+ 1 FAILED TEST

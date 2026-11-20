@@ -1,0 +1,26 @@
+[
+  {
+    "name": "test_180123",
+    "legacy_commit": "4aa57209802009ebe0c510f75c0abd8c47daf7a5",
+    "frames": 1644,
+    "input_hash_equal": true,
+    "imu_hash_equal": true,
+    "timestamps_equal": true,
+    "losses": 0,
+    "missing_pose_frames": 0,
+    "map_resets": 0,
+    "peak_speed_mps": 1.7669271552913317
+  },
+  {
+    "name": "test_162436",
+    "legacy_commit": "4aa57209802009ebe0c510f75c0abd8c47daf7a5",
+    "frames": 1798,
+    "input_hash_equal": true,
+    "imu_hash_equal": true,
+    "timestamps_equal": true,
+    "losses": 0,
+    "missing_pose_frames": 0,
+    "map_resets": 0,
+    "peak_speed_mps": 1.2280144117780936
+  }
+]
