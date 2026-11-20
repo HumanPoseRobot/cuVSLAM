@@ -1,0 +1,92 @@
+--- a/cunls/minimizer/residual_batch.cu
++++ b/cunls/minimizer/residual_batch.cu
+@@ -215,7 +215,9 @@
+   assert(residuals != nullptr);
+   assert(state_pointers != nullptr);
+ 
+-  factor_batch_->Evaluate(residuals, jacobians, state_pointers, stream);
++  if(!factor_batch_->Evaluate(residuals,jacobians,state_pointers,stream)) {
++    return false;
++  }
+ 
+   int num_residuals = static_cast<int>(factor_batch_->NumFactors());
+   int residual_dim = static_cast<int>(factor_batch_->ResidualsSize());
+@@ -245,7 +247,9 @@
+       residuals, sq_err_ptr, num_residuals, residual_dim);
+   THROW_ON_CUDA_ERROR(cudaGetLastError());
+ 
+-  loss_function_->Evaluate(sq_err_ptr, rho_ptr, num_residuals, stream);
++  if(!loss_function_->Evaluate(sq_err_ptr,rho_ptr,num_residuals,stream)) {
++    return false;
++  }
+ 
+   if (jacobians != nullptr) {
+     int num_cols = 0;
+--- a/cunls/minimizer/gauss_newton_minimizer.cu
++++ b/cunls/minimizer/gauss_newton_minimizer.cu
+@@ -1,3 +1,4 @@
++#include <stdexcept>
+ /*
+  * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+  * All rights reserved. SPDX-License-Identifier: Apache-2.0
+@@ -175,7 +176,9 @@
+   for (size_t i = 0; i < residual_batches.size(); i++) {
+     const auto &rb = residual_batches[i];
+     auto ptrs = state_pointers[i].data();
+-    rb.Evaluate(stream, workspace_ptr, residuals_ptr, ptrs, cost_ptr, nullptr);
++    if(!rb.Evaluate(stream, workspace_ptr, residuals_ptr, ptrs, cost_ptr, nullptr)) {
++      throw std::runtime_error("Residual batch evaluation failed; aborting before state publication");
++    }
+     const auto &factor_batch = rb.GetFactorBatch();
+     cost_ptr += factor_batch->NumFactors();
+   }
+@@ -240,7 +243,9 @@
+     const auto &rb = residual_batches[i];
+     auto ptrs = state_pointers[i].data();
+ 
+-    rb.Evaluate(stream, workspace_ptr, residuals_ptr, ptrs, nullptr, jacobian_ptr);
++    if(!rb.Evaluate(stream, workspace_ptr, residuals_ptr, ptrs, nullptr, jacobian_ptr)) {
++      throw std::runtime_error("Residual batch evaluation failed; aborting before state publication");
++    }
+ 
+     const auto &factor_batch = rb.GetFactorBatch();
+     size_t num_residuals = factor_batch->NumFactors() * factor_batch->ResidualsSize();
+--- a/cunls/factor/information_factor_batch.h
++++ b/cunls/factor/information_factor_batch.h
+@@ -148,7 +148,9 @@
+   bool Evaluate(float *residuals, float *jacobians,
+                 float const *const *state_pointers,
+                 cudaStream_t stream) const final {
+-    factor_batch_.Evaluate(residuals, jacobians, state_pointers, stream);
++    if(!factor_batch_.Evaluate(residuals, jacobians, state_pointers, stream)) {
++      return false;
++    }
+ 
+     auto handle = cublas_handle_.GetHandle(stream);
+     auto info_ptr =
+--- a/cunls/factor/weighted_factor_batch.h
++++ b/cunls/factor/weighted_factor_batch.h
+@@ -181,7 +181,9 @@
+   bool Evaluate(float *residuals, float *jacobians,
+                 float const *const *state_pointers,
+                 cudaStream_t stream) const final {
+-    factor_batch_.Evaluate(residuals, jacobians, state_pointers, stream);
++    if(!factor_batch_.Evaluate(residuals, jacobians, state_pointers, stream)) {
++      return false;
++    }
+ 
+     const size_t rsize = T::residual_size_;
+     const size_t num_factors = factor_batch_.NumFactors();
+--- a/cunls/robustifier/scaled_loss_function_batch.h
++++ b/cunls/robustifier/scaled_loss_function_batch.h
+@@ -95,7 +95,9 @@
+     if (num_losses <= 0) {
+       return true;
+     }
+-    loss_function_.Evaluate(s, out, num_losses, stream);
++    if(!loss_function_.Evaluate(s, out, num_losses, stream)) {
++      return false;
++    }
+     ApplyScaling(a_, out, num_losses, stream);
+     return true;
+   }

@@ -14,6 +14,8 @@
 
 set(SOURCES
         imu_boundary_test.cpp
+        init_math_test.cpp
+        closed_form_math_test.cpp
         imu_pnp_test.cpp
         )
 set(LIBS

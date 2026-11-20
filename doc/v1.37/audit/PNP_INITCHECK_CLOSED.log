@@ -1,0 +1,93 @@
+========= COMPUTE-SANITIZER
+[==========] Running 26 tests from 9 test suites.
+[----------] Global test environment set-up.
+[----------] 10 tests from MultisensorPoseEstimatorTest
+[ RUN      ] MultisensorPoseEstimatorTest.ReprojectionConvergence
+[       OK ] MultisensorPoseEstimatorTest.ReprojectionConvergence (597 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.EmptyObservations
+[       OK ] MultisensorPoseEstimatorTest.EmptyObservations (3 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.InertialPriorWithoutResidualsFails
+[       OK ] MultisensorPoseEstimatorTest.InertialPriorWithoutResidualsFails (3 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.MultiCameraReprojectionConvergence
+[       OK ] MultisensorPoseEstimatorTest.MultiCameraReprojectionConvergence (26 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.BehindCameraCannotBeSuccessfulPnP
+[       OK ] MultisensorPoseEstimatorTest.BehindCameraCannotBeSuccessfulPnP (3 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.InvalidInputDoesNotMutateOutputs
+[       OK ] MultisensorPoseEstimatorTest.InvalidInputDoesNotMutateOutputs (3 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.RealCudaPlusMatchesFourCameraJacobian
+[       OK ] MultisensorPoseEstimatorTest.RealCudaPlusMatchesFourCameraJacobian (4 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.CpuPnPNeedsMatchedVisibleObservations
+[       OK ] MultisensorPoseEstimatorTest.CpuPnPNeedsMatchedVisibleObservations (0 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.NonfiniteLMStepQualityMustReject
+[       OK ] MultisensorPoseEstimatorTest.NonfiniteLMStepQualityMustReject (0 ms)
+[ RUN      ] MultisensorPoseEstimatorTest.WhitenedCudaPlusMatchesFourCameraJacobian
+[       OK ] MultisensorPoseEstimatorTest.WhitenedCudaPlusMatchesFourCameraJacobian (5 ms)
+[----------] 10 tests from MultisensorPoseEstimatorTest (665 ms total)
+
+[----------] 2 tests from VisualSupportTest
+[ RUN      ] VisualSupportTest.UnrelatedOutliersDoNotDiluteObservableConsensus
+[       OK ] VisualSupportTest.UnrelatedOutliersDoNotDiluteObservableConsensus (0 ms)
+[ RUN      ] VisualSupportTest.DegenerateConsensusCannotSupportSixDofPose
+[       OK ] VisualSupportTest.DegenerateConsensusCannotSupportSixDofPose (0 ms)
+[----------] 2 tests from VisualSupportTest (13 ms total)
+
+[----------] 1 test from FrozenBootstrapPnP
+[ RUN      ] FrozenBootstrapPnP.RepeatsSameInputWithoutChangingAcceptance
+/tmp/source_ray_uncertainty_20261120/src/libs/pnp/test/multisensor_pose_estimator_test.cpp:446: Skipped
+Frozen input is supplied by the diagnostic harness
+
+[  SKIPPED ] FrozenBootstrapPnP.RepeatsSameInputWithoutChangingAcceptance (4 ms)
+[----------] 1 test from FrozenBootstrapPnP (4 ms total)
+
+[----------] 2 tests from VisualCauchy
+[ RUN      ] VisualCauchy.GpuCostAndDerivativeAreConsistentForBothAdapters
+[       OK ] VisualCauchy.GpuCostAndDerivativeAreConsistentForBothAdapters (1 ms)
+[ RUN      ] VisualCauchy.RawCauchyMatchesCostDerivatives
+[       OK ] VisualCauchy.RawCauchyMatchesCostDerivatives (1 ms)
+[----------] 2 tests from VisualCauchy (13 ms total)
+
+[----------] 6 tests from PointToPointICPTest
+[ RUN      ] PointToPointICPTest.ResidualZeroAtGT
+[       OK ] PointToPointICPTest.ResidualZeroAtGT (21 ms)
+[ RUN      ] PointToPointICPTest.JacobianMatchesAnalyticFormula
+[       OK ] PointToPointICPTest.JacobianMatchesAnalyticFormula (4 ms)
+[ RUN      ] PointToPointICPTest.ResidualMatchesDepthDifferenceForZPerturbation
+[       OK ] PointToPointICPTest.ResidualMatchesDepthDifferenceForZPerturbation (4 ms)
+[ RUN      ] PointToPointICPTest.ResidualInvariantToLateralTranslationOnPlane
+[       OK ] PointToPointICPTest.ResidualInvariantToLateralTranslationOnPlane (5 ms)
+[ RUN      ] PointToPointICPTest.RelativeDepthRejection
+[       OK ] PointToPointICPTest.RelativeDepthRejection (9 ms)
+[ RUN      ] PointToPointICPTest.CamFromRigComposition
+[       OK ] PointToPointICPTest.CamFromRigComposition (9 ms)
+[----------] 6 tests from PointToPointICPTest (56 ms total)
+
+[----------] 2 tests from GeometryProfile
+[ RUN      ] GeometryProfile.PointEliminationMatchesFullJointDampedQR
+[       OK ] GeometryProfile.PointEliminationMatchesFullJointDampedQR (0 ms)
+[ RUN      ] GeometryProfile.StereoHistoryRefinesPoseWithoutWritingLandmarks
+GEOMETRY_GRADIENT_AUDIT ray=0 variables=96 max_relative=3.13564982706e-07
+GEOMETRY_GRADIENT_AUDIT ray=1 variables=96 max_relative=1.025180499e-06
+[       OK ] GeometryProfile.StereoHistoryRefinesPoseWithoutWritingLandmarks (10 ms)
+[----------] 2 tests from GeometryProfile (17 ms total)
+
+[----------] 1 test from PixelSupport
+[ RUN      ] PixelSupport.NativeFisheyeUsesActualPixelDistanceAtImagePeriphery
+[       OK ] PixelSupport.NativeFisheyeUsesActualPixelDistanceAtImagePeriphery (0 ms)
+[----------] 1 test from PixelSupport (4 ms total)
+
+[----------] 1 test from ResidualFailureContract
+[ RUN      ] ResidualFailureContract.FailedFactorAndLossStopBeforePublishingState
+[       OK ] ResidualFailureContract.FailedFactorAndLossStopBeforePublishingState (58 ms)
+[----------] 1 test from ResidualFailureContract (58 ms total)
+
+[----------] 1 test from SparseProductContract
+[ RUN      ] SparseProductContract.OutputHistoryDoesNotAffectOverwriteProduct
+[       OK ] SparseProductContract.OutputHistoryDoesNotAffectOverwriteProduct (5 ms)
+[----------] 1 test from SparseProductContract (5 ms total)
+
+[----------] Global test environment tear-down
+[==========] 26 tests from 9 test suites ran. (862 ms total)
+[  PASSED  ] 25 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] FrozenBootstrapPnP.RepeatsSameInputWithoutChangingAcceptance
+========= ERROR SUMMARY: 0 errors

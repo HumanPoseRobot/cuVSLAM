@@ -44,7 +44,7 @@ if(USE_CUNLS)
     set(HEADERS ${HEADERS} multisensor_pose_estimator.h)
     # Host-only source (no device code); built by the host compiler. Not LANGUAGE CUDA — see the
     # note in libs/map/CMakeLists.txt (nvcc cannot parse Eigen's ARM NEON headers on aarch64).
-    set(SOURCES ${SOURCES} multisensor_pose_estimator.cpp)
+    set(SOURCES ${SOURCES} multisensor_pose_estimator.cpp geometry_profile.cpp)
     # PlaneMap / DepthPointMap / DepthCameraInfo / Plane now live in libs/map/ (under USE_CUNLS),
     # but multisensor_pose_estimator.h still references map::Plane in its public API and the
     # solver pulls in map/plane_map.h, so the pnp lib gains a map dep on this branch.

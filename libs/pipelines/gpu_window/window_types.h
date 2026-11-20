@@ -15,6 +15,13 @@ struct Visual {
   int node = 0, point = 0;
   gpu_vi::Observation obs{};
 };
+// A fixed source-camera coordinate chart for one optimization call. Bearing
+// offsets remain variables: noisy source pixels are not made exact constraints.
+struct SourceRay {
+  double Rwc[9]{1, 0, 0, 0, 1, 0, 0, 0, 1}, ray[2]{}, source_xy[2]{}, center[3]{};
+  double inverse_depth = 0;
+  int node = -1;
+};
 struct Problem {
   std::array<State, Slots> nodes{}, anchors{};
   std::vector<std::array<double, 3>> points;
@@ -22,6 +29,7 @@ struct Problem {
   std::vector<Visual> visuals;
   std::array<double, Dim * Dim> W{};
   std::array<double, Dim> offset{};
+  std::vector<SourceRay> source_rays;
   int count = 0, iterations = 7;
   double huber = 1;
 };

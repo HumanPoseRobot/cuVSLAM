@@ -1,5 +1,6 @@
 #include "window_fp64.h"
 #include <Eigen/Cholesky>
+#include <Eigen/LU>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -150,6 +151,39 @@ public:
 };
 }  // namespace
 
+void ConfigureSourceRays(Problem& p) {
+  p.source_rays.clear();
+  p.source_rays.resize(p.points.size());
+  for (const auto& v : p.visuals) {
+    auto& chart = p.source_rays.at(v.point);
+    if (chart.node >= 0) {
+      continue;
+    }
+    const auto& state = p.nodes[v.node];
+    Eigen::Map<const Eigen::Matrix<double, 3, 3, Eigen::RowMajor>> Rwi(state.R), Rci(v.obs.Rci);
+    const Eigen::Matrix3d Rcw = Rci * Rwi.transpose();
+    const Eigen::Matrix3d Rwc = Rcw.inverse();
+    const Eigen::Vector3d origin = Eigen::Map<const Eigen::Vector3d>(state.p);
+    const Eigen::Vector3d tci = Eigen::Map<const Eigen::Vector3d>(v.obs.tci);
+    const Eigen::Vector3d pc = Rcw * (Eigen::Map<const Eigen::Vector3d>(p.points[v.point].data()) - origin) + tci;
+    if (!pc.allFinite() || !(pc.z() > v.obs.min_depth) || !Rwc.allFinite()) {
+      continue;
+    }
+    Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(chart.Rwc) = Rwc;
+    Eigen::Map<Eigen::Vector3d>(chart.center) = origin - Rwc * tci;
+    chart.ray[0] = pc.x() / pc.z();
+    chart.ray[1] = pc.y() / pc.z();
+    chart.source_xy[0] = v.obs.xy[0];
+    chart.source_xy[1] = v.obs.xy[1];
+    chart.inverse_depth = 1. / pc.z();
+    chart.node = v.node;
+  }
+  for (const auto& c : p.source_rays) {
+    if (c.node < 0) {
+      throw std::runtime_error("source ray has no visible anchor");
+    }
+  }
+}
 Evaluation EvaluateHost(const Problem& p, const std::vector<double>& x, bool jacobian) {
   const int n = 15 * p.count;
   Evaluation e;
@@ -192,10 +226,31 @@ Evaluation EvaluateHost(const Problem& p, const std::vector<double>& x, bool jac
     std::copy_n(x.data() + 15 * v.node, 15, a);
     std::copy_n(x.data() + n + 3 * v.point, 3, a + 15);
     Linearize<2, 18>(
-        a, [&](auto* a, auto* b) { visual_res(v, p.nodes[v.node], p.points[v.point].data(), a, b); },
+        a,
+        [&](auto* a, auto* b) {
+          visual_res(v, p.nodes[v.node], p.points[v.point].data(), a, b,
+                     p.source_rays.empty() ? nullptr : &p.source_rays[v.point]);
+        },
         e.visual.data() + 2 * i, jacobian ? e.visual_j.data() + 36 * i : nullptr);
   }
   return e;
+}
+Evaluation EvaluatePosterior(const Problem& p, const Result& result) {
+  if (result.points.size() != 3 * p.points.size()) {
+    throw std::invalid_argument("posterior point result shape");
+  }
+  std::vector<double> x(15 * p.count + 3 * p.points.size(), 0.);
+  for (int i = 0; i < 15 * p.count; ++i) {
+    x[i] = result.x[i];
+  }
+  for (size_t i = 0; i < result.points.size(); ++i) {
+    x[15 * p.count + i] = result.points[i];
+  }
+  auto cartesian = p;
+  // Optimize returns Cartesian point increments at the legacy API boundary.
+  // Applying a source-ray transform again would use different geometry.
+  cartesian.source_rays.clear();
+  return EvaluateHost(cartesian, x, true);
 }
 std::unique_ptr<Backend> MakeCpu(const Problem& p) { return std::make_unique<Cpu>(p); }
 Report Minimize(const Problem& p, Backend& backend) {
@@ -264,7 +319,17 @@ Result Optimize(const Problem& p, bool gpu) {
   }
   Result out;
   std::copy_n(r.x.data(), 15 * p.count, out.x.data());
-  out.points.assign(r.x.begin() + 15 * p.count, r.x.end());
+  out.points.resize(3 * p.points.size());
+  for (size_t i = 0; i < p.points.size(); ++i) {
+    double delta[3];
+    source_point_delta(p.source_rays.empty() ? nullptr : &p.source_rays[i], r.x.data() + 15 * p.count + 3 * i, delta);
+    for (int k = 0; k < 3; ++k) {
+      if (!float_representable(delta[k])) {
+        return invalid;
+      }
+      out.points[3 * i + k] = delta[k];
+    }
+  }
   out.before = r.before;
   out.after = r.after;
   out.iterations = r.iterations;
@@ -275,7 +340,7 @@ Result Optimize(const Problem& p, bool gpu) {
 // Versioned, same-build diagnostic snapshots. No pointers or process state are serialized.
 namespace {
 struct Header {
-  unsigned long long magic = 0x4650363457494e31ULL;
+  unsigned long long magic = 0x4650363457494e32ULL;
   int count, iterations;
   double huber;
 };
@@ -318,6 +383,7 @@ void SaveProblem(const Problem& p, const char* path) {
   WriteVec(s, p.points);
   WriteVec(s, p.edges);
   WriteVec(s, p.visuals);
+  WriteVec(s, p.source_rays);
   if (!s) {
     throw std::runtime_error("cannot save window snapshot");
   }
@@ -326,7 +392,7 @@ Problem LoadProblem(const char* path) {
   std::ifstream s(path, std::ios::binary);
   Header h;
   Read(s, h);
-  if (!s || h.magic != 0x4650363457494e31ULL || h.count < 2 || h.count > 6) {
+  if (!s || (h.magic != 0x4650363457494e31ULL && h.magic != 0x4650363457494e32ULL) || h.count < 2 || h.count > 6) {
     throw std::runtime_error("invalid snapshot");
   }
   Problem p;
@@ -340,6 +406,9 @@ Problem LoadProblem(const char* path) {
   ReadVec(s, p.points);
   ReadVec(s, p.edges);
   ReadVec(s, p.visuals);
+  if (h.magic == 0x4650363457494e32ULL) {
+    ReadVec(s, p.source_rays);
+  }
   if (!s) {
     throw std::runtime_error("truncated snapshot");
   }

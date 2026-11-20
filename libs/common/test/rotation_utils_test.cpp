@@ -171,3 +171,26 @@ TEST(RotationUtilsTest, CalculateRotationFromSVD_3x4Matrix) {
   EXPECT_TRUE(computed_rotation.isApprox(expected_rotation, 1e-6f)) << computed_rotation;
   EXPECT_NEAR(computed_rotation.determinant(), 1.0f, 1e-6f) << computed_rotation;
 }
+
+TEST(RotationUtilsTest, ProjectionPrecisionAndNearestProperRotation) {
+  using namespace cuvslam;
+  for (int k = 0; k < 200; ++k) {
+    const double angle = .017 * k;
+    const Eigen::Matrix3d R = Eigen::AngleAxisd(angle, Eigen::Vector3d(1, 2, -3).normalized()).toRotationMatrix();
+    const Eigen::Matrix3d V = Eigen::AngleAxisd(.013 * k, Eigen::Vector3d(-2, 1, 4).normalized()).toRotationMatrix();
+    for (bool reflected : {false, true}) {
+      Eigen::Vector3d singular(.1, 1., 10.);
+      if (reflected) {
+        singular[0] *= -1.;
+      }
+      const Matrix3T input = (R * singular.asDiagonal() * V.transpose()).cast<float>();
+      const Matrix3T out = common::CalculateRotationFromSVD<float, 3>(input);
+      EXPECT_NEAR(out.determinant(), 1.f, 4e-7f);
+      EXPECT_LT((out.transpose() * out - Matrix3T::Identity()).norm(), 4e-7f);
+      EXPECT_LT((out.cast<double>() - R * V.transpose()).norm(), 3e-6);
+    }
+  }
+  Matrix3T invalid = Matrix3T::Identity();
+  invalid(0, 0) = std::numeric_limits<float>::infinity();
+  EXPECT_FALSE((common::CalculateRotationFromSVD<float, 3>(invalid)).allFinite());
+}

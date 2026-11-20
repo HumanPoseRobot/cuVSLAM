@@ -1,0 +1,12 @@
+--- a/cunls/linear_solver/block_sparse_pcg_solver.cu
++++ b/cunls/linear_solver/block_sparse_pcg_solver.cu
+@@ -1123,6 +1123,9 @@
+   // 2. Initialize PCG with x_0 = 0 ⇒ r_0 = b.
+   // -----------------------------------------------------------------
+   THROW_ON_CUDA_ERROR(cudaMemsetAsync(result.data(), 0, n * sizeof(float), stream));
++  // cuSPARSE may read its beta=0 destination while scaling. Initialize the
++  // reusable Ap workspace once per Solve, before the first SpMV.
++  THROW_ON_CUDA_ERROR(cudaMemsetAsync(Ap_.data(),0,n*sizeof(float),stream));
+   THROW_ON_CUDA_ERROR(
+       cudaMemcpyAsync(r_.data(), rhs.data(), n * sizeof(float), cudaMemcpyDeviceToDevice, stream));
+ 

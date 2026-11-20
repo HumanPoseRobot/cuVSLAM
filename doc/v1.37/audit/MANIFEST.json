@@ -1,0 +1,11 @@
+{
+  "core_sha256": "70390eb7b2c8c09c83b0f7a3684a09721761dcb34de0868aa5153a40f1d1e21a",
+  "baseline_sha256": "3beb4eba3ba790ba66c66883563ad41cebafb99da578abe74b892f674fabf6f0",
+  "model": "Calibrated measurement information with relative IRLS attenuation; conditional on accepted inliers and fixed map; not complete map-pose covariance",
+  "gate": "CTEST_SAFE_FINAL.log",
+  "qualification": "Independent correctness candidate; no release overwrite; existing navigation engineering seed retained",
+  "full_candidate_sequences": 6,
+  "baseline_sequences": 6,
+  "baseline_reused_from": "/nas/shared/baidx/cuvslam_runs/visual_information_statistical_20261120",
+  "pose_gravity_bitwise_equal_all_sequences": true
+}

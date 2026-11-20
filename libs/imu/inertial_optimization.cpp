@@ -1,7 +1,7 @@
-#include "imu/lm_model_reduction.h"
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
-#include <cstdlib>
+#include "imu/lm_model_reduction.h"
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -52,63 +52,98 @@ void AuditArray(std::ostream& out, const Eigen::MatrixBase<Derived>& value) {
   out << '[';
   for (Eigen::Index r = 0; r < value.rows(); ++r) {
     for (Eigen::Index c = 0; c < value.cols(); ++c) {
-      if (r || c) out << ',';
+      if (r || c) {
+        out << ',';
+      }
       const double x = value(r, c);
-      if (std::isfinite(x)) out << x;
-      else out << "null";
+      if (std::isfinite(x)) {
+        out << x;
+      } else {
+        out << "null";
+      }
     }
   }
   out << ']';
 }
 int64_t AuditAnchor(const std::vector<Pose>& poses) {
-  if (poses.size() < 2) return -1;
+  if (poses.size() < 2) {
+    return -1;
+  }
   const auto& m = poses[poses.size() - 2].preintegration.measurements();
   return m.empty() ? -1 : m.back().time_ns;
 }
-void AuditInit(const char* stage, const std::vector<Pose>& poses, const Matrix3T& Rg,
-               const Vector3T& bg, const Vector3T& ba, const Matrix3T& prior) {
+void AuditInit(const char* stage, const std::vector<Pose>& poses, const Matrix3T& Rg, const Vector3T& bg,
+               const Vector3T& ba, const Matrix3T& prior) {
   const char* dir = std::getenv("VIO_INIT_SNAPSHOT_DIR");
-  if (!dir) return;
+  if (!dir) {
+    return;
+  }
   std::ofstream out(std::string(dir) + "/" + std::to_string(AuditAnchor(poses)) + "_" + stage + ".json");
   out << std::setprecision(17) << "{\"stage\":\"" << stage << "\",\"Rgravity\":";
-  AuditArray(out, Rg); out << ",\"bg\":"; AuditArray(out, bg);
-  out << ",\"ba\":"; AuditArray(out, ba); out << ",\"acc_prior\":"; AuditArray(out, prior);
+  AuditArray(out, Rg);
+  out << ",\"bg\":";
+  AuditArray(out, bg);
+  out << ",\"ba\":";
+  AuditArray(out, ba);
+  out << ",\"acc_prior\":";
+  AuditArray(out, prior);
   out << ",\"poses\":[";
   for (size_t i = 0; i < poses.size(); ++i) {
-    if (i) out << ',';
-    out << "{\"R\":"; AuditArray(out, poses[i].w_from_imu.linear());
-    out << ",\"p\":"; AuditArray(out, poses[i].w_from_imu.translation());
-    out << ",\"v\":"; AuditArray(out, poses[i].velocity); out << '}';
+    if (i) {
+      out << ',';
+    }
+    out << "{\"R\":";
+    AuditArray(out, poses[i].w_from_imu.linear());
+    out << ",\"p\":";
+    AuditArray(out, poses[i].w_from_imu.translation());
+    out << ",\"v\":";
+    AuditArray(out, poses[i].velocity);
+    out << '}';
   }
   out << "],\"edges\":[";
   for (size_t i = 0; i + 1 < poses.size(); ++i) {
-    if (i) out << ',';
+    if (i) {
+      out << ',';
+    }
     const auto& pi = poses[i].preintegration;
-    out << "{\"dt\":" << pi.GetDeltaT_s() << ",\"dR\":"; AuditArray(out, pi.GetDeltaRotation(bg));
-    out << ",\"dV\":"; AuditArray(out, pi.GetDeltaVelocity(bg, Vector3T::Zero()));
-    out << ",\"dP\":"; AuditArray(out, pi.GetDeltaPosition(bg, Vector3T::Zero()));
-    out << ",\"JVa\":"; AuditArray(out, pi.JVa); out << ",\"JPa\":"; AuditArray(out, pi.JPa);
-    out << ",\"JRg\":"; AuditArray(out, pi.JRg); out << ",\"cov\":"; AuditArray(out, pi.cov_matrix_);
+    out << "{\"dt\":" << pi.GetDeltaT_s() << ",\"dR\":";
+    AuditArray(out, pi.GetDeltaRotation(bg));
+    out << ",\"dV\":";
+    AuditArray(out, pi.GetDeltaVelocity(bg, Vector3T::Zero()));
+    out << ",\"dP\":";
+    AuditArray(out, pi.GetDeltaPosition(bg, Vector3T::Zero()));
+    out << ",\"JVa\":";
+    AuditArray(out, pi.JVa);
+    out << ",\"JPa\":";
+    AuditArray(out, pi.JPa);
+    out << ",\"JRg\":";
+    AuditArray(out, pi.JRg);
+    out << ",\"cov\":";
+    AuditArray(out, pi.cov_matrix_);
     out << '}';
   }
   out << "]}";
 }
-void AuditLm(const std::vector<Pose>& poses, int iteration, const Eigen::MatrixXf& H,
-             const Eigen::VectorXf& gradient, const Eigen::VectorXf& step, float lambda,
-             float before, float after, float predicted) {
+void AuditLm(const std::vector<Pose>& poses, int iteration, const Eigen::MatrixXf& H, const Eigen::VectorXf& gradient,
+             const Eigen::VectorXf& step, const Eigen::VectorXf& scaling, float lambda, float before, float after,
+             float predicted) {
   const char* dir = std::getenv("VIO_INIT_SNAPSHOT_DIR");
-  if (!dir) return;
+  if (!dir) {
+    return;
+  }
   std::ofstream out(std::string(dir) + "/" + std::to_string(AuditAnchor(poses)) + "_lm.jsonl", std::ios::app);
-  out << std::setprecision(17) << "{\"iteration\":" << iteration << ",\"size\":" << H.rows()
-      << ",\"lambda\":" << lambda << ",\"before\":" << before << ",\"after\":" << after
-      << ",\"predicted\":" << predicted << ",\"H\":";
-  AuditArray(out, H); out << ",\"gradient\":"; AuditArray(out, gradient);
-  out << ",\"step\":"; AuditArray(out, step); out << "}\n";
+  out << std::setprecision(17) << "{\"iteration\":" << iteration << ",\"size\":" << H.rows() << ",\"lambda\":" << lambda
+      << ",\"before\":" << before << ",\"after\":" << after << ",\"predicted\":" << predicted << ",\"H\":";
+  AuditArray(out, H);
+  out << ",\"gradient\":";
+  AuditArray(out, gradient);
+  out << ",\"step\":";
+  AuditArray(out, step);
+  out << ",\"scaling\":";
+  AuditArray(out, scaling);
+  out << "}\n";
 }
 }  // namespace
-
-
-
 
 float InertialOptimizer::calc_cost_with_update(const std::vector<Pose>& poses, const Matrix3T& Rgravity,
                                                const Vector3T& gyro_bias, const Vector3T& acc_bias,
@@ -398,7 +433,9 @@ Vector3T InertialOptimizer::SolveGyroBias(std::vector<Pose>& poses) {
 Eigen::Matrix<float, 3, 2> InertialOptimizer::TangentBasis(const Vector3T& g) {
   Vector3T a = g.normalized();
   Vector3T tmp(0.f, 0.f, 1.f);
-  if (std::abs(a.dot(tmp)) > 0.99f) tmp << 1.f, 0.f, 0.f;
+  if (std::abs(a.dot(tmp)) > 0.99f) {
+    tmp << 1.f, 0.f, 0.f;
+  }
   Vector3T b = (tmp - a * a.dot(tmp)).normalized();
   Vector3T c = a.cross(b);
   Eigen::Matrix<float, 3, 2> bc;
@@ -424,7 +461,9 @@ bool InertialOptimizer::LinearAlignment(std::vector<Pose>& poses, const Vector3T
   TRACE_EVENT ev = profiler_domain_.trace_event("LinearAlignment");
 
   int num_poses = static_cast<int>(poses.size());
-  if (num_poses < 2) return false;
+  if (num_poses < 2) {
+    return false;
+  }
   int num_inertials = num_poses - 1;
 
   // Variables: [v_0, v_1, ..., v_{N-1}, g(3D), ba(3D)]  total: 3*N + 6
@@ -437,9 +476,13 @@ bool InertialOptimizer::LinearAlignment(std::vector<Pose>& poses, const Vector3T
     const Pose& pose_j = poses[i + 1];
     const auto& preint = pose_i.preintegration;
 
-    if (preint.empty()) continue;
+    if (preint.empty()) {
+      continue;
+    }
     float dt = preint.GetDeltaT_s();
-    if (dt < 1e-6f) continue;
+    if (dt < 1e-6f) {
+      continue;
+    }
 
     const Matrix3T& R_i = pose_i.w_from_imu.linear();
     const Vector3T p_i = pose_i.w_from_imu.translation();
@@ -498,15 +541,14 @@ bool InertialOptimizer::LinearAlignment(std::vector<Pose>& poses, const Vector3T
     b.segment<3>(gi) += r_b.segment<3>(6);
     b.segment<3>(bi) += r_b.segment<3>(9);
   }
-  // Regularize acc_bias (prior added after scaling so it stays at physical units)
+  // Regularize absolute acc_bias before applying the common system scale.
   const int bi = 3 * num_poses + 3;
   A.block<3, 3>(bi, bi) += acc_prior_info;
 
   // Scale for numerical stability (matching VINS-Mono convention).
-  // Normal-equation entries carry dt^2..dt^4 factors (dt ~ 1e-2 s), clustering
-  // around 1e-4..1e-8 and eating into float32's mantissa during LDLT. Lifting
-  // both sides by 1000 shifts them into a better-conditioned range without
-  // changing the solution. Same trick as VINS-Mono's LinearAlignment.
+  // Both sides retain the historical common scale. Uniform scaling does not
+  // improve the condition number or recover float32 significant digits; it
+  // only changes absolute magnitudes and leaves the exact solution unchanged.
   A *= 1000.f;
   b *= 1000.f;
   Eigen::VectorXf x = A.ldlt().solve(b);
@@ -537,7 +579,9 @@ void InertialOptimizer::RefineGravity(std::vector<Pose>& poses, const Vector3T& 
   TRACE_EVENT ev = profiler_domain_.trace_event("RefineGravity");
 
   int num_poses = static_cast<int>(poses.size());
-  if (num_poses < 2) return;
+  if (num_poses < 2) {
+    return;
+  }
   int num_inertials = num_poses - 1;
 
   Vector3T g0 = Rgravity * default_gravity;
@@ -556,9 +600,13 @@ void InertialOptimizer::RefineGravity(std::vector<Pose>& poses, const Vector3T& 
       const Pose& pose_j = poses[i + 1];
       const auto& preint = pose_i.preintegration;
 
-      if (preint.empty()) continue;
+      if (preint.empty()) {
+        continue;
+      }
       float dt = preint.GetDeltaT_s();
-      if (dt < 1e-6f) continue;
+      if (dt < 1e-6f) {
+        continue;
+      }
 
       const Matrix3T& R_i = pose_i.w_from_imu.linear();
       const Vector3T p_i = pose_i.w_from_imu.translation();
@@ -620,7 +668,7 @@ void InertialOptimizer::RefineGravity(std::vector<Pose>& poses, const Vector3T& 
       b.segment<3>(bi) += r_b.segment<3>(8);
     }
     // Prior on absolute acc_bias: ||acc_bias + delta_ba||² * prior
-    // H contribution: prior (added after 1000x scaling, stays at physical units)
+    // H and RHS prior contributions receive the same common scale as all rows.
     // RHS contribution: -prior * acc_bias (anchors absolute bias toward zero)
     const int bi = 3 * num_poses + 2;
     A.block<3, 3>(bi, bi) += acc_prior_info;
@@ -670,7 +718,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
   }
 
   Vector3T acc_bias = Vector3T::Zero();
-  AuditInit("prelinear",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
+  AuditInit("prelinear", poses, Rgravity, gyro_bias, acc_bias, acc_prior_info);
   bool linear_ok = LinearAlignment(poses, gyro_bias, Rgravity, acc_bias);
   if (!linear_ok) {
     // A failed metric alignment is not an initialized inertial state. Averaging
@@ -680,7 +728,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     return false;
   }
   RefineGravity(poses, gyro_bias, Rgravity, acc_bias);
-  AuditInit("refined",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
+  AuditInit("refined", poses, Rgravity, gyro_bias, acc_bias, acc_prior_info);
 
   Eigen::MatrixXf hessian;
   // 3 - for each velocity in each pose, 2 - for gravity, 3 - for gyro bias, 3 - for acc bias
@@ -690,7 +738,9 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
   negative_gradient.setZero(3 * num_poses + 8);
 
   auto initial_cost = calc_cost_with_update(poses, Rgravity, gyro_bias, acc_bias, negative_gradient, robustifier);
-  if (!std::isfinite(initial_cost)) { return false; }
+  if (!std::isfinite(initial_cost)) {
+    return false;
+  }
   if (initial_cost < 1e-5) {
     for (Pose& p : poses) {
       p.gyro_bias = gyro_bias;
@@ -720,14 +770,17 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
       return false;
     }
     Eigen::VectorXf step = decomposition.solve(-negative_gradient);
-    if (!step.allFinite()) { return false; }
+    if (!step.allFinite()) {
+      return false;
+    }
     ev2.Pop();
 
     auto cost = calc_cost_with_update(poses, Rgravity, gyro_bias, acc_bias, step, robustifier);
-    auto predicted_relative_reduction = std::getenv("VIO_INIT_SYMMETRIC_GAIN")
-        ? InitPredictedReduction(hessian, step, scaling, lambda, current_cost)
-        : step.dot(hessian * step) / current_cost +
-              2.f * lambda * step.dot(scaling.asDiagonal() * step) / current_cost;
+    // LDLT solves the symmetric matrix stored in the lower triangle.
+    // LM acceptance must use that same quadratic model, by default.
+    const auto predicted_relative_reduction = InitPredictedReduction(hessian, step, scaling, lambda, current_cost);
+    AuditLm(poses, num_iterations, hessian, negative_gradient, step, scaling, lambda, current_cost, cost,
+            predicted_relative_reduction);
 
     if ((predicted_relative_reduction < sqrt_epsilon()) && (step.template lpNorm<1>() < sqrt_epsilon())) {
       current_cost = cost;
@@ -791,7 +844,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     }
   } while (num_iterations < max_iterations);
 
-  AuditInit("final",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
+  AuditInit("final", poses, Rgravity, gyro_bias, acc_bias, acc_prior_info);
   // Always commit the best available biases: LM result if it improved, otherwise
   // the LinearAlignment/RefineGravity estimates which are already valid.
   if (current_cost >= initial_cost) {
@@ -862,7 +915,7 @@ bool InertialOptimizer::OptimizeInertialAdaptive(
     Rgravity = SolveGravityDirection(poses, default_gravity);
   }
   RefineGravity(poses, gyro_bias, Rgravity, acc_bias);
-  AuditInit("refined",poses,Rgravity,gyro_bias,acc_bias,acc_prior_info);
+  AuditInit("refined", poses, Rgravity, gyro_bias, acc_bias, acc_prior_info);
 
   Eigen::MatrixXf hessian;
   hessian.setZero(3 * num_poses + 8, 3 * num_poses + 8);
@@ -893,10 +946,11 @@ bool InertialOptimizer::OptimizeInertialAdaptive(
     ev2.Pop();
 
     auto cost = calc_cost_with_update(poses, Rgravity, gyro_bias, acc_bias, step, robustifier);
-    auto predicted_relative_reduction = std::getenv("VIO_INIT_SYMMETRIC_GAIN")
-        ? InitPredictedReduction(hessian, step, scaling, lambda, current_cost)
-        : step.dot(hessian * step) / current_cost +
-              2.f * lambda * step.dot(scaling.asDiagonal() * step) / current_cost;
+    // LDLT solves the symmetric matrix stored in the lower triangle.
+    // LM acceptance must use that same quadratic model, by default.
+    const auto predicted_relative_reduction = InitPredictedReduction(hessian, step, scaling, lambda, current_cost);
+    AuditLm(poses, num_iterations, hessian, negative_gradient, step, scaling, lambda, current_cost, cost,
+            predicted_relative_reduction);
 
     if ((predicted_relative_reduction < sqrt_epsilon()) && (step.template lpNorm<1>() < sqrt_epsilon())) {
       current_cost = cost;
@@ -1002,7 +1056,9 @@ bool InertialOptimizer::OptimizeInertialAdaptive(
 
       // Ensure sign consistency with visual translation
       Vector3T t_world = t_dir_world.normalized() * scale;
-      if (t_world.dot(visual_t) < 0) t_world = -t_world;
+      if (t_world.dot(visual_t) < 0) {
+        t_world = -t_world;
+      }
 
       poses[i + 1].w_from_imu.translation() = poses[i].w_from_imu.translation() + t_world;
     }

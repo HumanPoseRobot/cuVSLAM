@@ -19,9 +19,12 @@ public:
   virtual double Evaluate(const std::vector<double>& x, bool jacobian) = 0;
   virtual Step Solve(double lambda) = 0;
 };
+void ConfigureSourceRays(Problem&);
 std::unique_ptr<Backend> MakeCpu(const Problem&);
 std::unique_ptr<Backend> MakeGpu(const Problem&);
 Evaluation EvaluateHost(const Problem&, const std::vector<double>&, bool);
+// Re-evaluate Cartesian public results in FP64, including source-ray solves.
+Evaluation EvaluatePosterior(const Problem&, const Result&);
 struct Report {
   std::vector<double> x;
   double before = 0, after = 0, max_linear_residual = 0;

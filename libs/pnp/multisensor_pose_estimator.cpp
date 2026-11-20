@@ -1,4 +1,5 @@
 #include "pnp/cauchy_parameters.h"
+#include "pnp/visual_information.h"
 #include "pnp/visual_support.h"
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -165,8 +166,8 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
                                      const std::unordered_map<TrackId, Vector3T>& landmarks,
                                      const RGBDInfos& depth_infos, const std::vector<map::Plane>& planes,
                                      const std::vector<Vector3T>& depth_points,
-                                     const std::optional<InertialPriorInput>& imu_in,
-                                     InertialPosteriorOutput* imu_out, int visual_loss_mode) const {
+                                     const std::optional<InertialPriorInput>& imu_in, InertialPosteriorOutput* imu_out,
+                                     int visual_loss_mode) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("solve");
   last_visual_trial_.reset();
 
@@ -192,7 +193,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
                                          [](const RGBDInfo* depth_info) { return depth_info != nullptr; });
 
   if (n < settings_.min_observations && num_depth == 0 && !imu_in.has_value()) {
-    TraceMessage("PNP_REJECT reason=insufficient_candidates matched=%zu required=%zu",n,settings_.min_observations);
+    TraceMessage("PNP_REJECT reason=insufficient_candidates matched=%zu required=%zu", n, settings_.min_observations);
     return false;
   }
 
@@ -223,18 +224,22 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
       const auto& lm = matched_landmarks_[i];
       gpu_observation_xy_[i] = {obs.xy.x(), obs.xy.y()};
       if (whitened) {
-        const Eigen::Matrix2d information=9.*obs.xy_info.cast<double>();
-        Eigen::LLT<Eigen::Matrix2d> factor((information+information.transpose())*.5);
-        if (factor.info()!=Eigen::Success) {return false;}
-        const Eigen::Matrix2d w=factor.matrixU();
-        gpu_sqrt_information_[i]={float(w(0,0)),float(w(0,1)),float(w(1,0)),float(w(1,1))};
+        const Eigen::Matrix2d information = 9. * obs.xy_info.cast<double>();
+        Eigen::LLT<Eigen::Matrix2d> factor((information + information.transpose()) * .5);
+        if (factor.info() != Eigen::Success) {
+          return false;
+        }
+        const Eigen::Matrix2d w = factor.matrixU();
+        gpu_sqrt_information_[i] = {float(w(0, 0)), float(w(0, 1)), float(w(1, 0)), float(w(1, 1))};
       }
       d_lm_world_[i] = {lm.x(), lm.y(), lm.z()};
       IsometryToSE3Transform(rig_.camera_from_rig[obs.cam_id], d_cam_from_rig_[i]);
     }
 
     gpu_observation_xy_.copy_top_n(cuda::ToGPU, n, s);
-    if (whitened) {gpu_sqrt_information_.copy_top_n(cuda::ToGPU,n,s);}
+    if (whitened) {
+      gpu_sqrt_information_.copy_top_n(cuda::ToGPU, n, s);
+    }
     d_lm_world_.copy_top_n(cuda::ToGPU, n, s);
     d_cam_from_rig_.copy_top_n(cuda::ToGPU, n, s);
   }
@@ -269,14 +274,16 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
     const float z_threshold = 1e-3f;
 
     pnp_cost.emplace(obs_ptr, cam_from_rig_ptr, lm_world_ptr, n, z_threshold);
-    if(whitened){pnp_cost->SetSqrtInformation(reinterpret_cast<const float*>(gpu_sqrt_information_.ptr()));}
+    if (whitened) {
+      pnp_cost->SetSqrtInformation(reinterpret_cast<const float*>(gpu_sqrt_information_.ptr()));
+    }
     // Per-residual normalization: scale = weight / num_residuals, so the total loss
     // contribution is independent of the observation count.
-    if(whitened) {
-      const auto loss=VisualCauchyParameters(fw.reprojection/static_cast<float>(n),visual_loss_mode);
-      loss_reproj.emplace(loss.weight,loss.b,loss.c);
+    if (whitened) {
+      const auto loss = VisualCauchyParameters(fw.reprojection / static_cast<float>(n), visual_loss_mode);
+      loss_reproj.emplace(loss.weight, loss.b, loss.c);
     } else {
-      loss_reproj.emplace(fw.reprojection/static_cast<float>(n),1,fw.robust_reprojection);
+      loss_reproj.emplace(fw.reprojection / static_cast<float>(n), 1, fw.robust_reprojection);
     }
     pose_state_ptrs_.assign(n, se3_states.StateBlockDevicePtr(0));
     problem.AddFactorBatch(&*pnp_cost, &*loss_reproj, pose_state_ptrs_);
@@ -435,7 +442,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
 
       inertial_cost = std::make_unique<cunls::SE3BetweenFactorBatch>(d_imu_delta_.ptr(), 1);
       // 6 = SE3 DOF, normalising the weight per-residual to match the other factor scaling.
-      inertial_loss.emplace(fw.inertial / 6.0f, 1, fw.robust_inertial);
+      inertial_loss.emplace(fw.inertial / 6.f, 1, fw.robust_inertial);
       inertial_state_ptrs_.clear();
       inertial_state_ptrs_.push_back(prev_pose_state->StateBlockDevicePtr(0));
       inertial_state_ptrs_.push_back(se3_states.StateBlockDevicePtr(0));
@@ -469,33 +476,77 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
     return false;
   }
 
-  if(whitened) {
-    size_t inliers=0;
-    Eigen::MatrixXd visual_jacobian(2*n,6);
-    for(size_t i=0;i<n;++i){const auto& observation=filtered_obs_[i];const auto* camera=rig_.intrinsics[observation.cam_id];
-      const Vector3T pc=rig_.camera_from_rig[observation.cam_id]*candidate*matched_landmarks_[i];
-      Vector2T predicted,measured;
-      if(!pc.allFinite()||pc.z()<=1e-3f||!camera->denormalizePoint(pc.hnormalized(),predicted)||!camera->denormalizePoint(observation.xy,measured)){continue;}
-      const Vector2T residual=pc.hnormalized()-observation.xy;
-      const double chi=9.*residual.cast<double>().dot(observation.xy_info.cast<double>()*residual.cast<double>());
-      if(chi<=9.21&&(predicted-measured).squaredNorm()<=64.f){
-        const Eigen::Vector3d p=matched_landmarks_[i].cast<double>();
-        Eigen::Matrix<double,3,6> tangent=Eigen::Matrix<double,3,6>::Zero();
-        tangent(0,1)=p.z();tangent(0,2)=-p.y();tangent(1,0)=-p.z();tangent(1,2)=p.x();tangent(2,0)=p.y();tangent(2,1)=-p.x();tangent.rightCols<3>().setIdentity();
-        const double z=pc.z();Eigen::Matrix<double,2,3> projection;projection<<1./z,0.,-pc.x()/(z*z),0.,1./z,-pc.y()/(z*z);
-        const Eigen::Matrix3d rotation=(rig_.camera_from_rig[observation.cam_id].linear()*candidate.linear()).cast<double>();
-        const Eigen::Matrix2d information=9.*observation.xy_info.cast<double>();Eigen::LLT<Eigen::Matrix2d> factor(information);
-        if(factor.info()!=Eigen::Success){continue;}
-        visual_jacobian.block<2,6>(2*inliers,0)=factor.matrixU()*projection*rotation*tangent;++inliers;
-      }
-    }
-    const bool supported=HasObservableVisualSupport(visual_jacobian.topRows(2*inliers),inliers,required);
-    TraceMessage("PNP_WEIGHTED accepted=%d matched=%zu inliers=%zu cost_before=%.9g cost_after=%.9g",int(supported),n,inliers,summary.initial_cost,summary.final_cost);
-    if(!supported){return false;}
+  // Project to SO(3) via SVD to correct numerical drift from iterative optimization.
+  if (std::getenv("VIO_VISUAL_INFORMATION")) {
+    candidate.linear() = common::CalculateRotationFromSVD(candidate.matrix());
   }
 
-  // Project to SO(3) via SVD to correct numerical drift from iterative optimization.
-  candidate.linear() = common::CalculateRotationFromSVD(candidate.matrix());
+  Eigen::Matrix<double, 6, 6> visual_information = Eigen::Matrix<double, 6, 6>::Zero();
+  if (whitened) {
+    size_t inliers = 0;
+    Eigen::MatrixXd visual_jacobian(2 * n, 6);
+    for (size_t i = 0; i < n; ++i) {
+      const auto& observation = filtered_obs_[i];
+      const auto* camera = rig_.intrinsics[observation.cam_id];
+      const Vector3T pc = rig_.camera_from_rig[observation.cam_id] * candidate * matched_landmarks_[i];
+      Vector2T predicted, measured;
+      if (!pc.allFinite() || pc.z() <= 1e-3f || !camera->denormalizePoint(pc.hnormalized(), predicted) ||
+          !camera->denormalizePoint(observation.xy, measured)) {
+        continue;
+      }
+      const Vector2T residual = pc.hnormalized() - observation.xy;
+      const double chi = 9. * residual.cast<double>().dot(observation.xy_info.cast<double>() * residual.cast<double>());
+      if (chi <= 9.21 && (predicted - measured).squaredNorm() <= 64.f) {
+        const Eigen::Vector3d p = matched_landmarks_[i].cast<double>();
+        Eigen::Matrix<double, 3, 6> tangent = Eigen::Matrix<double, 3, 6>::Zero();
+        tangent(0, 1) = p.z();
+        tangent(0, 2) = -p.y();
+        tangent(1, 0) = -p.z();
+        tangent(1, 2) = p.x();
+        tangent(2, 0) = p.y();
+        tangent(2, 1) = -p.x();
+        tangent.rightCols<3>().setIdentity();
+        const double z = pc.z();
+        Eigen::Matrix<double, 2, 3> projection;
+        projection << 1. / z, 0., -pc.x() / (z * z), 0., 1. / z, -pc.y() / (z * z);
+        const Eigen::Matrix3d rotation =
+            (rig_.camera_from_rig[observation.cam_id].linear() * candidate.linear()).cast<double>();
+        const Eigen::Matrix2d information = 9. * observation.xy_info.cast<double>();
+        Eigen::LLT<Eigen::Matrix2d> factor(information);
+        if (factor.info() != Eigen::Success) {
+          continue;
+        }
+        visual_jacobian.block<2, 6>(2 * inliers, 0) = factor.matrixU() * projection * rotation * tangent;
+        const auto J = visual_jacobian.block<2, 6>(2 * inliers, 0).eval();
+        const auto loss = VisualCauchyParameters(fw.reprojection / static_cast<float>(n), visual_loss_mode);
+        const double weight = VisualInformationWeight(chi, loss.c);
+        visual_information.noalias() += weight * J.transpose() * J;
+        ++inliers;
+      }
+    }
+    const bool supported = HasObservableVisualSupport(visual_jacobian.topRows(2 * inliers), inliers, required);
+    TraceMessage("PNP_WEIGHTED accepted=%d matched=%zu inliers=%zu cost_before=%.9g cost_after=%.9g", int(supported), n,
+                 inliers, summary.initial_cost, summary.final_cost);
+    if (!supported) {
+      return false;
+    }
+  }
+
+  if (!std::getenv("VIO_VISUAL_INFORMATION")) {
+    candidate.linear() = common::CalculateRotationFromSVD(candidate.matrix());
+  }
+  Matrix6T posterior_information;
+  posterior_information = Matrix6T::Identity();
+  if (whitened && std::getenv("VIO_VISUAL_INFORMATION")) {
+    const auto H = (.5 * (visual_information + visual_information.transpose())).eval();
+    if (!H.allFinite()) {
+      return false;
+    }
+    posterior_information = H.cast<float>();
+  }
+  if (!posterior_information.allFinite()) {
+    return false;
+  }
 
   // Posterior inertial state.  The inertial factor uses prev_velocity / biases as baked-in
   // constants, so this LM does not refine them — surface the input values unchanged and let the
@@ -506,8 +557,8 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
     imu_out->acc_bias = imu_in->prev_acc_bias;
   }
 
+  static_info_exp = posterior_information;
   rig_from_world = candidate;
-  static_info_exp = Matrix6T::Identity();
   return true;
 }
 

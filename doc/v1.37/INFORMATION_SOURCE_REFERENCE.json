@@ -1,0 +1,38 @@
+[
+  {
+    "path": "libs/pnp/visual_information.h",
+    "sha256": "6673275caa58d808cf05a8cef0dee20a281425f3fdb12c74c42882ecc602cb7e"
+  },
+  {
+    "path": "libs/pnp/multisensor_pose_estimator.cpp",
+    "sha256": "d365229d43fdb4396b000c019e539000024b433e01fa54b3ae97fc8e312c39ac"
+  },
+  {
+    "path": "libs/pnp/geometry_profile.h",
+    "sha256": "952b85823610b15d95bfe6558b6d0bf1155a338fe8140f15b0529d622f257c4f"
+  },
+  {
+    "path": "libs/pnp/geometry_profile.cpp",
+    "sha256": "3e9566db76ebbce9b2d4253df7fe6b64f23d17784024b1026a888c7ad57195bb"
+  },
+  {
+    "path": "libs/pnp/test/visual_information_test.cpp",
+    "sha256": "281e91b28449a5a5a5c22c64b653b48cba964866feb7473486f8239c3cd1a29c"
+  },
+  {
+    "path": "libs/pnp/test/geometry_profile_test.cpp",
+    "sha256": "62ed36891c5fe6b245444840795e733bfa06abc0ad7d49ed89a04124a91a855f"
+  },
+  {
+    "path": "libs/pnp/test/multisensor_pose_estimator_test.cpp",
+    "sha256": "ceb5519ab7be494efab7fc26ac4d03f94ce699a447b0b5d17c9d4b72d616d175"
+  },
+  {
+    "path": "libs/pnp/test/CMakeLists.txt",
+    "sha256": "b48e5c7a3037d5919db6d172e7d708d8ded361f9f19d778b0827241c3bad3abe"
+  },
+  {
+    "path": "libs/pipelines/imu_fusion_context.cpp",
+    "sha256": "090e9bc96985baa9019ed686eb2934f54d44c3c968fde25612ff01638c6ae0c9"
+  }
+]

@@ -58,12 +58,35 @@ WHD void edge_res(const Edge& e, const State& l, const State& r, const T* x, T* 
     }
   }
 }
+// Returns a WORLD Cartesian increment. The relative form preserves x=0
+// exactly even when input float rotations have small orthogonality error.
+WHD inline double depth_exp(double x) { return ::exp(x); }
+WHD inline gpu_vi::Jet depth_exp(gpu_vi::Jet x) {
+  const double value = ::exp(x.v);
+  return {value, value * x.d};
+}
 template <class T>
-WHD void visual_res(const Visual& o, const State& a, const double* point, const T* x, T* r) {
-  T R[9], p[3], v[3], dp[3], pi[3], pc[3];
+WHD void source_point_delta(const SourceRay* chart, const T* q, T* delta) {
+  if (!chart) {
+    for (int k = 0; k < 3; ++k) {
+      delta[k] = q[k];
+    }
+    return;
+  }
+  const T scale = depth_exp(-q[2]);
+  const T local[3] = {(scale * (chart->ray[0] + q[0]) - chart->ray[0]) / chart->inverse_depth,
+                      (scale * (chart->ray[1] + q[1]) - chart->ray[1]) / chart->inverse_depth,
+                      (scale - 1.) / chart->inverse_depth};
+  mv(chart->Rwc, local, delta);
+}
+template <class T>
+WHD void visual_res(const Visual& o, const State& a, const double* point, const T* x, T* r,
+                    const SourceRay* chart = nullptr) {
+  T R[9], p[3], v[3], dp[3], pi[3], pc[3], point_delta[3];
+  source_point_delta(chart, x + 15, point_delta);
   pose(a, x, R, p, v);
   for (int k = 0; k < 3; ++k) {
-    dp[k] = point[k] + x[15 + k] - p[k];
+    dp[k] = point[k] + point_delta[k] - p[k];
   }
   mtv(R, dp, pi);
   mv(o.obs.Rci, pi, pc);

@@ -88,8 +88,8 @@ __global__ void EdgeEval(const State* ns, const Edge* edges, const double* x, do
     }
   }
 }
-__global__ void VisualEval(int n, const State* ns, const double* points, const Visual* vs, const double* x, double* r,
-                           double* j, bool jac) {
+__global__ void VisualEval(int n, const State* ns, const double* points, const Visual* vs, const SourceRay* charts,
+                           const double* x, double* r, double* j, bool jac) {
   int z = blockIdx.x, c = int(threadIdx.x) - 1;
   if (c >= 18 || (!jac && c >= 0)) {
     return;
@@ -99,7 +99,7 @@ __global__ void VisualEval(int n, const State* ns, const double* points, const V
   for (int k = 0; k < 18; ++k) {
     a[k] = {x[k < 15 ? 15 * v.node + k : n + 3 * v.point + k - 15], k == c ? 1. : 0.};
   }
-  visual_res(v, ns[v.node], points + 3 * v.point, a, b);
+  visual_res(v, ns[v.node], points + 3 * v.point, a, b, charts ? charts + v.point : nullptr);
   for (int k = 0; k < 2; ++k) {
     if (c < 0) {
       r[2 * z + k] = b[k].v;
@@ -391,6 +391,7 @@ class Gpu final : public Backend {
   Buffer<State> nodes;
   Buffer<Edge> edges;
   Buffer<Visual> visuals;
+  Buffer<SourceRay> source_rays;
   Buffer<double> points, x, pr, pj, er, ej, vr, vj, H, B, C, g, nav, blocks, rhs, factors, projected, reduced, dx,
       metrics;
   Buffer<int> node_offsets, node_ids, point_offsets, point_ids, status;
@@ -406,6 +407,7 @@ public:
         nodes(p.count),
         edges(ne),
         visuals(nv),
+        source_rays(p.source_rays.size()),
         points(3 * np),
         x(n + 3 * np),
         pr(n),
@@ -441,6 +443,7 @@ public:
     nodes.Upload(p.nodes.data(), p.count, stream);
     edges.Upload(p.edges.data(), ne, stream);
     visuals.Upload(p.visuals.data(), nv, stream);
+    source_rays.Upload(p.source_rays.data(), p.source_rays.size(), stream);
     points.Upload(reinterpret_cast<const double*>(p.points.data()), 3 * np, stream);
     auto index = [&](int count, bool point, Buffer<int>& offset, Buffer<int>& ids) {
       std::vector<int> o(count + 1), v;
@@ -473,7 +476,8 @@ public:
       EdgeEval<<<ne, 32, 0, stream>>>(nodes.ptr, edges.ptr, x.ptr, er.ptr, ej.ptr, jac);
     }
     if (nv) {
-      VisualEval<<<nv, 32, 0, stream>>>(n, nodes.ptr, points.ptr, visuals.ptr, x.ptr, vr.ptr, vj.ptr, jac);
+      VisualEval<<<nv, 32, 0, stream>>>(n, nodes.ptr, points.ptr, visuals.ptr, source_rays.ptr, x.ptr, vr.ptr, vj.ptr,
+                                        jac);
     }
     if (jac) {
       AssembleNav<<<n, 128, 0, stream>>>(n, ne, edges.ptr, pr.ptr, pj.ptr, er.ptr, ej.ptr, vr.ptr, vj.ptr,

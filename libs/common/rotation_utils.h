@@ -17,6 +17,8 @@
 #ifndef ROTATION_UTILS_H
 #define ROTATION_UTILS_H
 
+#include <limits>
+#include <type_traits>
 #include "include_eigen.h"
 
 namespace cuvslam {
@@ -35,20 +37,25 @@ namespace common {
 template <typename Scalar, int Dim>
 EIGEN_DEVICE_FUNC Eigen::Matrix<Scalar, Dim, Dim> CalculateRotationFromSVD(
     const Eigen::Matrix<Scalar, Dim, Dim>& transform_matrix) {
-  using MatrixType = Eigen::Matrix<Scalar, Dim, Dim>;
-
-  // Perform SVD decomposition
-  Eigen::JacobiSVD<MatrixType> svd(transform_matrix, Eigen::ComputeFullU | Eigen::ComputeFullV);
+  using WorkScalar = typename std::conditional<std::is_same<Scalar, float>::value, double, Scalar>::type;
+  using MatrixType = Eigen::Matrix<WorkScalar, Dim, Dim>;
+  if (!transform_matrix.allFinite()) {
+    return Eigen::Matrix<Scalar, Dim, Dim>::Constant(std::numeric_limits<Scalar>::quiet_NaN());
+  }
+  // Float JacobiSVD can return det errors above 1e-6 for ordinary finite
+  // scaled/reflected inputs. Project in FP64 and round once at the API boundary.
+  const MatrixType input = transform_matrix.template cast<WorkScalar>();
+  Eigen::JacobiSVD<MatrixType> svd(input, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
   // U * V^T is the closest orthogonal matrix, but may have det = -1 (reflection).
   // When that happens, negating U's last column (smallest singular value) yields
   // the closest proper rotation -- equivalent to subtracting 2 * u_last * v_last^T
   // from U * V^T, which avoids a second full matmul.
   MatrixType uvt = svd.matrixU() * svd.matrixV().adjoint();
-  if (uvt.determinant() < Scalar(0)) {
-    uvt -= Scalar(2) * svd.matrixU().col(Dim - 1) * svd.matrixV().col(Dim - 1).adjoint();
+  if (uvt.determinant() < WorkScalar(0)) {
+    uvt -= WorkScalar(2) * svd.matrixU().col(Dim - 1) * svd.matrixV().col(Dim - 1).adjoint();
   }
-  return uvt;
+  return uvt.template cast<Scalar>();
 }
 
 /**

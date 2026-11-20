@@ -1,3 +1,4 @@
+#include "pnp/pixel_support.h"
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
@@ -14,7 +15,6 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
-#include "window_backend.h"
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -22,6 +22,7 @@
 #include <set>
 #include <string>
 #include "common/log.h"
+#include "window_backend.h"
 #include "window_commit_validation.h"
 #include "window_fp64.h"
 #include "window_linear.h"
@@ -80,20 +81,17 @@ WinEvaluation evaluate_window(const WinProblem& p, const WinResult& r) {
   // The optimizer's FP64 path must retain FP64 rows through posterior recovery
   // and marginalization too. Previously EvaluateCpu rounded every Jacobian and
   // residual to float before those nominally-double QR operations.
-  if (fp64_window() && std::getenv("VIO_WINDOW_FP64_POSTERIOR")) {
-    std::vector<double> x(15*p.count + 3*p.points.size(),0.);
-    for (int i=0;i<15*p.count;++i) { x[i]=r.x[i]; }
-    for (size_t i=0;i<r.points.size();++i) { x[15*p.count+i]=r.points[i]; }
-    return gpu_window::fp64::EvaluateHost(p,x,true);
+  if (fp64_window()) {
+    return gpu_window::fp64::EvaluatePosterior(p, r);
   }
-  const auto legacy=(cpu_window() || fp64_window()) ? EvaluateCpu(p,r) : Evaluate(p,r);
+  const auto legacy = (cpu_window() || fp64_window()) ? EvaluateCpu(p, r) : Evaluate(p, r);
   WinEvaluation result;
-  result.prior.assign(legacy.prior.begin(),legacy.prior.end());
-  result.prior_j.assign(legacy.prior_j.begin(),legacy.prior_j.end());
-  result.edge.assign(legacy.edge.begin(),legacy.edge.end());
-  result.edge_j.assign(legacy.edge_j.begin(),legacy.edge_j.end());
-  result.visual.assign(legacy.visual.begin(),legacy.visual.end());
-  result.visual_j.assign(legacy.visual_j.begin(),legacy.visual_j.end());
+  result.prior.assign(legacy.prior.begin(), legacy.prior.end());
+  result.prior_j.assign(legacy.prior_j.begin(), legacy.prior_j.end());
+  result.edge.assign(legacy.edge.begin(), legacy.edge.end());
+  result.edge_j.assign(legacy.edge_j.begin(), legacy.edge_j.end());
+  result.visual.assign(legacy.visual.begin(), legacy.visual.end());
+  result.visual_j.assign(legacy.visual_j.begin(), legacy.visual_j.end());
   return result;
 }
 
@@ -171,9 +169,7 @@ bool reprojection_inlier(const camera::Rig& rig, const Isometry3T& rig_from_worl
   if (!pc.allFinite() || pc.z() <= .05f) {
     return false;
   }
-  const Vector2T error = pc.hnormalized() - observation.xy;
-  return error.dot(9.f * observation.xy_info * error) <= 9.21f &&
-         error.cwiseProduct(rig.intrinsics[camera]->getFocal()).squaredNorm() <= 64.f;
+  return pnp::PixelObservationSupported(rig, observation, pc, .05f);
 }
 
 bool map_support_preserved(const WindowBackend::FrameInput& input, const Graph& candidate,
@@ -352,6 +348,9 @@ WinProblem pack(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig
     rw.bottomRightCorner<3, 3>() = .002 * ba.cast<double>();
     whiten<6>(e.rw, rw);
     p.edges.push_back(e);
+  }
+  if (fp64_window() && std::getenv("VIO_SOURCE_RAY")) {
+    gpu_window::fp64::ConfigureSourceRays(p);
   }
   return p;
 }
@@ -673,10 +672,7 @@ bool WindowBackend::solve(const FrameInput& input, Pose& result) {
                                             ++behind;
                                             return true;
                                           }
-                                          const Vector2T error = pc.hnormalized() - o.xy;
-                                          const double score = error.cast<double>().dot(
-                                              9. * o.xy_info.template cast<double>() * error.cast<double>());
-                                          if (!std::isfinite(score) || score > 9.21) {
+                                          if (!pnp::PixelObservationSupported(rig, o, pc, .05f)) {
                                             ++removed;
                                             return true;
                                           }

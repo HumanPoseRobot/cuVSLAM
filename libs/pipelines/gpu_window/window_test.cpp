@@ -22,16 +22,47 @@
 #include "window_validation.h"
 using namespace gpu_window;
 int main() {
-  for (int count : {2,3,4,6}) {
-    Problem p;p.count=count;p.huber=1.;
-    for (int i=0;i<15*count;++i) { p.W[i*Dim+i]=1.; }
-    p.W[0]=1e-50;
-    const std::vector<double> x(15*count,0.);
-    const auto precise=fp64::EvaluateHost(p,x,true);
-    assert(precise.prior.size()==size_t(15*count));
-    const auto reduced=assemble(p,precise,false);
-    assert(reduced.H(0,0)>0. && std::abs(reduced.H(0,0)/1e-100-1.)<1e-12);
-    assert(std::abs(reduced.H(1,1)-1.)<1e-12);
+  for (int count : {2, 3, 4, 6}) {
+    Problem p;
+    p.count = count;
+    for (int i = 0; i < 15 * count; ++i) {
+      p.W[i * Dim + i] = 1.;
+    }
+    p.W[15 * Dim + 15] = 1e-50;
+    p.offset[15] = 1e-25;
+    gpu_window::Result result;
+    const auto precise = fp64::EvaluatePosterior(p, result);
+    const auto legacy = EvaluateCpu(p, result);
+    assert(precise.prior_j.size() == size_t(15 * count * 15 * count));
+    assert(precise.prior_j[15 * (15 * count) + 15] == 1e-50);
+    assert(legacy.prior_j[15 * Dim + 15] == 0.f);
+    const auto rows = assemble(p, precise, true);
+    const auto marginalized = eliminate_first(rows, count);
+    Matrix W;
+    Vector c;
+    compress_prior(marginalized.rows.leftCols(15 * (count - 1)), marginalized.residual, W, c);
+    const Matrix H = W.transpose() * W;
+    const Vector g = W.transpose() * c;
+    assert(std::abs(H(0, 0) / 1e-100 - 1.) < 1e-12);
+    assert(std::abs(g[0] / 1e-75 - 1.) < 1e-12);
+    std::cout << "FP64_POSTERIOR_MARG count=" << count << " weak_H=" << H(0, 0) << " weak_g=" << g[0]
+              << " legacy_j=" << legacy.prior_j[15 * Dim + 15] << "\n";
+  }
+
+  for (int count : {2, 3, 4, 6}) {
+    Problem p;
+    p.count = count;
+    p.huber = 1.;
+    for (int i = 0; i < 15 * count; ++i) {
+      p.W[i * Dim + i] = 1.;
+    }
+    p.W[0] = 1e-50;
+    const std::vector<double> x(15 * count, 0.);
+    const auto precise = fp64::EvaluateHost(p, x, true);
+    assert(precise.prior.size() == size_t(15 * count));
+    const auto reduced = assemble(p, precise, false);
+    assert(reduced.H(0, 0) > 0. && std::abs(reduced.H(0, 0) / 1e-100 - 1.) < 1e-12);
+    assert(std::abs(reduced.H(1, 1) - 1.) < 1e-12);
     assert(valid_evaluation(precise));
   }
 
@@ -280,6 +311,73 @@ int main() {
     assert(std::abs(cpu64.x[i] - gpu64.x[i]) < 1e-6);
   }
   std::cout << "FP64 CPU/GPU normal solve and shared LM agree, residual=" << gpu_step.relative_residual << "\n";
+  {
+    auto ray = p;
+    fp64::ConfigureSourceRays(ray);
+    const auto a = fp64::EvaluateHost(p, initial64, true), b = fp64::EvaluateHost(ray, initial64, true);
+    assert(a.visual == b.visual);  // No initial landmark displacement.
+    auto a_reduced = assemble(p, a, false), b_reduced = assemble(ray, b, false);
+    assert((a_reduced.H - b_reduced.H).norm() < 1e-8 * std::max(1., a_reduced.H.norm()));
+    auto x = initial64;
+    for (size_t k = 15 * p.count; k < x.size(); ++k) {
+      x[k] = .002 * std::sin(double(k));
+    }
+    const auto derivative = fp64::EvaluateHost(ray, x, true);
+    double error = 0.;
+    for (int local = 0; local < 3; ++local) {
+      const int column = 15 * p.count + local;
+      auto hi = x, lo = x;
+      const double step = 1e-6;
+      hi[column] += step;
+      lo[column] -= step;
+      const auto plus = fp64::EvaluateHost(ray, hi, false), minus = fp64::EvaluateHost(ray, lo, false);
+      for (size_t k = 0; k < ray.visuals.size(); ++k) {
+        if (ray.visuals[k].point != 0) {
+          continue;
+        }
+        for (int row = 0; row < 2; ++row) {
+          const double numeric = (plus.visual[2 * k + row] - minus.visual[2 * k + row]) / (2 * step);
+          const double analytic = derivative.visual_j[36 * k + 18 * row + 15 + local];
+          error = std::max(error, std::abs(numeric - analytic) / std::max(1., std::abs(analytic)));
+        }
+      }
+    }
+    assert(error < 1e-7);
+    auto c = fp64::MakeCpu(ray), g = fp64::MakeGpu(ray);
+    const double cc = c->Evaluate(x, true), gc = g->Evaluate(x, true);
+    assert(std::abs(cc - gc) < 1e-9 * std::max(1., cc));
+    const auto cs = c->Solve(1e-3), gs = g->Solve(1e-3);
+    assert(cs.valid && gs.valid);
+    double step_error = 0;
+    for (size_t k = 0; k < cs.dx.size(); ++k) {
+      step_error = std::max(step_error, std::abs(cs.dx[k] - gs.dx[k]));
+    }
+    assert(step_error < 1e-6);
+    const auto cr = fp64::Minimize(ray, *c), gr = fp64::Minimize(ray, *g);
+    assert(std::abs(cr.after - gr.after) < 1e-8 * std::max(1., cr.after));
+    const auto result = fp64::Optimize(ray, true);
+    assert(valid_result(result, ray.points.size()));
+    std::vector<double> cartesian(15 * p.count + 3 * p.points.size());
+    for (int k = 0; k < 15 * p.count; ++k) {
+      cartesian[k] = result.x[k];
+    }
+    for (size_t k = 0; k < result.points.size(); ++k) {
+      cartesian[15 * p.count + k] = result.points[k];
+    }
+    const auto actual_posterior = fp64::EvaluatePosterior(ray, result);
+    const auto expected_posterior = fp64::EvaluateHost(p, cartesian, true);
+    assert(actual_posterior.visual == expected_posterior.visual);
+    assert(actual_posterior.visual_j == expected_posterior.visual_j);
+    assert(actual_posterior.edge == expected_posterior.edge);
+    assert(actual_posterior.prior == expected_posterior.prior);
+    auto check = fp64::MakeCpu(p);
+    const double physical_cost = check->Evaluate(cartesian, false);
+    assert(std::abs(physical_cost - result.after) < 1e-4 * std::max(1., physical_cost));
+    std::cout << "SOURCE_RAY_TEST zero_residual=exact schur_relative="
+              << (a_reduced.H - b_reduced.H).norm() / std::max(1., a_reduced.H.norm()) << " jacobian=" << error
+              << " cpu_gpu_step=" << step_error << " physical_cost=" << physical_cost
+              << " reported_cost=" << result.after << "\n";
+  }
   auto schur = OptimizeSchur(p);
   auto cpu = OptimizeCpu(p);
   assert(std::abs(schur.before - cpu.before) <= 1e-5 * std::max(1.f, cpu.before));
@@ -405,11 +503,15 @@ int main() {
       Eigen::Matrix3d R = Eigen::AngleAxisd(.4 + .1 * side, Eigen::Vector3d(1, -2, 3).normalized()).toRotationMatrix();
       for (int i = 0; i < 3; ++i) {
         q.nodes[side].p[i] += (i == 2 ? 1.5 : 2.);
-        for (int j = 0; j < 3; ++j) q.nodes[side].R[3 * i + j] = R(i, j);
+        for (int j = 0; j < 3; ++j) {
+          q.nodes[side].R[3 * i + j] = R(i, j);
+        }
       }
     }
     std::vector<double> x(15 * q.count + 3 * q.points.size());
-    for (size_t i = 0; i < x.size(); ++i) x[i] = .04 * (int(i % 5) - 2);
+    for (size_t i = 0; i < x.size(); ++i) {
+      x[i] = .04 * (int(i % 5) - 2);
+    }
     auto ev = fp64::EvaluateHost(q, x, true);
     double worst = 0;
     for (int col = 0; col < 15 * q.count; ++col) {
@@ -422,7 +524,7 @@ int main() {
         double ad = ev.prior_j[row * 15 * q.count + col];
         worst = std::max(worst, std::abs(num - ad) / std::max(1., std::abs(ad)));
       }
-      for (size_t k = 0; k < q.visuals.size(); ++k)
+      for (size_t k = 0; k < q.visuals.size(); ++k) {
         if (q.visuals[k].node == col / 15) {
           for (int row = 0; row < 2; ++row) {
             double num = (ea.visual[2 * k + row] - eb.visual[2 * k + row]) / 2e-6;
@@ -430,6 +532,7 @@ int main() {
             worst = std::max(worst, std::abs(num - ad) / std::max(1., std::abs(ad)));
           }
         }
+      }
     }
     assert(worst < 1e-5);
     std::cout << "Nonzero window visual/prior finite-difference relative error=" << worst << "\n";
@@ -447,13 +550,17 @@ int main() {
         std::remove_if(q.visuals.begin(), q.visuals.end(), [&](const Visual& v) { return v.node >= count; }),
         q.visuals.end());
     std::vector<double> x(15 * count + 3 * q.points.size());
-    for (size_t j = 0; j < x.size(); ++j) x[j] = .001 * (int(j % 5) - 2);
+    for (size_t j = 0; j < x.size(); ++j) {
+      x[j] = .001 * (int(j % 5) - 2);
+    }
     auto cpu = fp64::MakeCpu(q), gpu = fp64::MakeGpu(q);
     double c0 = cpu->Evaluate(x, true), c1 = gpu->Evaluate(x, true);
     auto a = cpu->Solve(1e-3), b = gpu->Solve(1e-3);
     assert(a.valid && b.valid);
     double max_delta = 0;
-    for (size_t j = 0; j < a.dx.size(); ++j) max_delta = std::max(max_delta, std::abs(a.dx[j] - b.dx[j]));
+    for (size_t j = 0; j < a.dx.size(); ++j) {
+      max_delta = std::max(max_delta, std::abs(a.dx[j] - b.dx[j]));
+    }
     assert(std::abs(c0 - c1) < 1e-8 * std::max(1., std::abs(c0)));
     assert(max_delta < 1e-6);
     std::cout << "FP64_COUNT_AUDIT count=" << count << " cost_delta=" << std::abs(c0 - c1)

@@ -1,0 +1,8 @@
+{
+  "cuvslam_patch_applies_to_committed_base": true,
+  "cunls_patch_sequence_reconstructed_from_verified_base": true,
+  "dependency_source_files_checked": 222,
+  "mismatches": [],
+  "temporary_clone": "/tmp/source_ray_uncertainty_20261120/cunls_rebuild_check_da8_blky/cunls",
+  "source_patch_sha256": "62bcac9b7b82b62076f30b5a5ee9373e36932ce3eabe3ccce29220a6e76d4944"
+}

@@ -1,0 +1,50 @@
+Internal ctest changing into directory: /tmp/visual_information_model_20261120/build
+Test project /tmp/visual_information_model_20261120/build
+      Start  4: cuda_modules_test
+      Start  1: camera_test
+ 1/22 Test  #1: camera_test ..........................   Passed    1.87 sec
+      Start 18: pipelines_test
+ 2/22 Test #18: pipelines_test .......................   Passed    1.28 sec
+      Start  7: log_test
+ 3/22 Test  #7: log_test .............................   Passed    1.01 sec
+      Start 21: utils_test
+ 4/22 Test #21: utils_test ...........................   Passed    0.69 sec
+      Start 13: gpu_window_math_test
+ 5/22 Test #13: gpu_window_math_test .................   Passed    0.67 sec
+      Start 20: sof_test
+ 6/22 Test #20: sof_test .............................   Passed    0.68 sec
+      Start 11: cuvslam_test
+ 7/22 Test #11: cuvslam_test .........................   Passed    0.65 sec
+      Start  9: map_test
+ 8/22 Test  #9: map_test .............................   Passed    0.56 sec
+      Start 10: pnp_test
+ 9/22 Test #10: pnp_test .............................   Passed    0.53 sec
+      Start 16: gpu_bias_rw_test
+10/22 Test #16: gpu_bias_rw_test .....................   Passed    0.47 sec
+      Start 19: slam_test
+11/22 Test #19: slam_test ............................   Passed    0.42 sec
+      Start 17: window_commit_test
+12/22 Test #17: window_commit_test ...................   Passed    0.41 sec
+      Start  3: common_test
+13/22 Test  #3: common_test ..........................   Passed    0.34 sec
+      Start  8: cuvslam_math_test
+14/22 Test  #8: cuvslam_math_test ....................   Passed    0.06 sec
+      Start 12: imu_test
+15/22 Test #12: imu_test .............................   Passed    0.04 sec
+      Start  6: epipolar_test
+16/22 Test  #6: epipolar_test ........................   Passed    0.01 sec
+      Start 15: imu_initialization_validation_test
+17/22 Test #15: imu_initialization_validation_test ...   Passed    0.03 sec
+      Start 14: frontend_guard_test
+18/22 Test #14: frontend_guard_test ..................   Passed    0.01 sec
+      Start  5: edex_test
+19/22 Test  #5: edex_test ............................   Passed    0.01 sec
+      Start 22: odometry_test
+20/22 Test #22: odometry_test ........................   Passed    0.01 sec
+      Start  2: camera_rig_edex_test
+21/22 Test  #2: camera_rig_edex_test .................   Passed    0.01 sec
+22/22 Test  #4: cuda_modules_test ....................   Passed   28.11 sec
+
+100% tests passed, 0 tests failed out of 22
+
+Total Test time (real) =  28.12 sec

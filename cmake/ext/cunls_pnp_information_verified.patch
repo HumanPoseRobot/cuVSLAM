@@ -1,0 +1,67 @@
+--- a/cunls/factor/pnp_factor_batch.h
++++ b/cunls/factor/pnp_factor_batch.h
+@@ -58,6 +58,8 @@
+ 
+   size_t NumFactors() const final { return num_observations_; }
+ 
++  void SetSqrtInformation(const float* row_major_matrices) { sqrt_information_ = row_major_matrices; }
++
+ private:
+   PnPFactorBatch() = delete;
+ 
+@@ -66,6 +68,7 @@
+   const SE3Transform *poses_camera_from_rig_ = nullptr;
+   size_t num_observations_;
+   float z_threshold_ = 1e-3f;
++  const float* sqrt_information_ = nullptr;
+ };
+ 
+ } // namespace cunls
+--- a/cunls/factor/pnp_factor_batch.cu
++++ b/cunls/factor/pnp_factor_batch.cu
+@@ -40,6 +40,7 @@
+                                  const Vector<3> *points_world,
+                                  float const *const *state_pointers,
+                                  const SE3Transform *poses_camera_from_rig,
++                                 const float *sqrt_information,
+                                  float *residuals, float *jacobians,
+                                  float z_threshold, int num_observations) {
+   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+@@ -94,8 +95,10 @@
+     float *res_ptr = residuals + tid * kResidualDim;
+ 
+     if (point_cam[2] < z_threshold) {
+-      res_ptr[0] = 0.0f;
+-      res_ptr[1] = 0.0f;
++      // An invalid projection must not lower a corrected robust objective to zero.
++      // This finite sentinel avoids overflow while making the ray an outlier.
++      res_ptr[0] = sqrt_information ? 1e3f : 0.0f;
++      res_ptr[1] = sqrt_information ? 1e3f : 0.0f;
+     } else {
+       inv_z = __frcp_rn(point_cam[2]);
+       const auto &obs = observations[tid];
+@@ -150,6 +153,15 @@
+     jac_ptr[1 * kJacobianCols + 1] = P[2] * Jp[1][0] - Jp[1][2] * P[0];
+     jac_ptr[1 * kJacobianCols + 2] = P[0] * Jp[1][1] - Jp[1][0] * P[1];
+   }
++  if (sqrt_information != nullptr && residuals != nullptr && point_cam[2] >= z_threshold) {
++    const float* w=sqrt_information+4*tid;
++    float* r=residuals+2*tid;const float a=r[0], b=r[1];
++    r[0]=w[0]*a+w[1]*b;r[1]=w[2]*a+w[3]*b;
++    if (jacobians != nullptr) {
++      float* j=jacobians+12*tid;
++      for(int c=0;c<6;++c){const float x=j[c],y=j[6+c];j[c]=w[0]*x+w[1]*y;j[6+c]=w[2]*x+w[3]*y;}
++    }
++  }
+ }
+ 
+ PnPFactorBatch::PnPFactorBatch(const Vector<2> *observations,
+@@ -176,7 +188,7 @@
+   size_t num_blocks = (num_observations_ + kPnPBlockSize - 1) / kPnPBlockSize;
+ 
+   pnp_fused_kernel<<<num_blocks, kPnPBlockSize, 0, stream>>>(
+-      observations_, points_world_, state_pointers, poses_camera_from_rig_,
++      observations_, points_world_, state_pointers, poses_camera_from_rig_, sqrt_information_,
+       residuals, jacobians, z_threshold_, static_cast<int>(num_observations_));
+ 
+   THROW_ON_CUDA_ERROR(cudaGetLastError());

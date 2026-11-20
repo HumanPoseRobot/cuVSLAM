@@ -9,12 +9,15 @@ class ReleaseDefaultsTest(unittest.TestCase):
         with patch.dict(os.environ, {
             'VIO_PNP_ROBUST_RESEED': '1', 'VIO_WINDOW_FP64_POSTERIOR': '1',
             'VIO_INIT_SYMMETRIC_GAIN': '1', 'VIO_TRIANGULATION_GEOMETRY': '1',
-            'CUVSLAM_WINDOW_SIZE': '6', 'PGO_EXPERIMENT': '1', 'SLAM_ENABLED': '1'
+            'VIO_SOURCE_RAY': '1', 'VIO_GEOMETRY_UNCERTAINTY': '1',
+            'VIO_EXPERIMENTAL_VISUAL_RESEED': '1', 'CUVSLAM_WINDOW_SIZE': '6', 'PGO_EXPERIMENT': '1', 'SLAM_ENABLED': '1'
         }, clear=True):
             env = run.release_environment()
         for key in ['VIO_PNP_ROBUST_RESEED', 'VIO_WINDOW_FP64_POSTERIOR',
-                    'VIO_INIT_SYMMETRIC_GAIN', 'VIO_TRIANGULATION_GEOMETRY', 'PGO_EXPERIMENT']:
+                    'VIO_INIT_SYMMETRIC_GAIN', 'VIO_TRIANGULATION_GEOMETRY', 'PGO_EXPERIMENT',
+                    'VIO_SOURCE_RAY', 'VIO_GEOMETRY_UNCERTAINTY', 'VIO_EXPERIMENTAL_VISUAL_RESEED']:
             self.assertNotIn(key, env)
+        self.assertEqual(env['VIO_VISUAL_INFORMATION'], '1')
         self.assertEqual(env['SLAM_ENABLED'], '0')
         self.assertEqual(env['VIO_COMPARE_SOLVER'], 'schur_fp64')
         self.assertEqual(env['VIO_INIT_VISUAL_CHECK'], 'enforce')

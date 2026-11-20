@@ -63,6 +63,15 @@ inline const char* invalid_problem(const Problem& p) {
       return "state_or_rotation";
     }
   }
+  if (!p.source_rays.empty() && p.source_rays.size() != p.points.size()) {
+    return "source_ray_shape";
+  }
+  for (const auto& c : p.source_rays) {
+    if (!valid_rotation(c.Rwc) || !finite_range(c.ray) || !finite_range(c.center) || !std::isfinite(c.inverse_depth) ||
+        c.inverse_depth <= 0 || c.node < 0 || c.node >= p.count) {
+      return "source_ray_input";
+    }
+  }
   for (const auto& point : p.points) {
     if (!finite_range(point)) {
       return "point_nonfinite";

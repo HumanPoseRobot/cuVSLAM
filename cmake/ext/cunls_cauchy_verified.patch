@@ -1,0 +1,39 @@
+--- a/cunls/robustifier/cauchy_loss_function_batch.cu
++++ b/cunls/robustifier/cauchy_loss_function_batch.cu
+@@ -36,9 +36,10 @@
+   const float inv = 1.0f / sum;
+ 
+   float3 &rho = out[tid];
+-  rho.x = b * logf(sum);
+-  rho.y = fmaxf(cuda::std::numeric_limits<float>::min(), inv);
+-  rho.z = -c * (inv * inv);
++  const float amplitude=b*c;
++  rho.x = b*log1pf(sq_error*c);
++  rho.y = fmaxf(cuda::std::numeric_limits<float>::min(), amplitude*inv);
++  rho.z = -amplitude*c*(inv*inv);
+ }
+ 
+ CauchyLossFunctionBatch::CauchyLossFunctionBatch(float b, float c)
+@@ -50,8 +51,7 @@
+     return true;
+   }
+   size_t num_blocks = (num_losses + kCauchyBlockSize - 1) / kCauchyBlockSize;
+-  cauchy_loss_kernel<<<num_blocks, kCauchyBlockSize, 0, stream>>>(
+-      b_, c_, s, out, num_losses);
++  cauchy_loss_kernel<<<num_blocks,kCauchyBlockSize,0,stream>>>(b_,c_,s,out,num_losses);
+   THROW_ON_CUDA_ERROR(cudaGetLastError());
+   return true;
+ }
+--- a/cunls/robustifier/cauchy_loss_function_batch.h
++++ b/cunls/robustifier/cauchy_loss_function_batch.h
+@@ -28,8 +28,8 @@
+  * For squared residual s:
+  *   sum = 1 + s * c
+  *   rho(s) = b * log(sum)
+- *   rho'(s) = 1 / sum
+- *   rho''(s) = -c / sum^2
++ *   rho'(s) = b*c / sum
++ *   rho''(s) = -b*c*c / sum^2
+  *
+  * The Cauchy loss is smooth and strongly down-weights large residuals.
+  */

@@ -67,7 +67,7 @@ def release_environment():
     env = {k: v for k, v in os.environ.items() if not k.startswith(('CUVSLAM_', 'PGO_', 'VIO_'))}
     env.update(BUILD_KIND='release', SLAM_ENABLED='0', VIO_COMPARE_SOLVER='schur_fp64',
                CUVSLAM_ONLINE_TEMPORAL='1', OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1',
-               VIO_PNP_WEIGHTED='1', VIO_PIXEL_GEOMETRY='1', VIO_VISUAL_GYRO_SEED='1',
+               VIO_PNP_WEIGHTED='1', VIO_PIXEL_GEOMETRY='1', VIO_VISUAL_INFORMATION='1', VIO_VISUAL_GYRO_SEED='1',
                VIO_BOOTSTRAP_STEREO_REFRESH='1', VIO_BOOTSTRAP_TRANSACTION='1',
                VIO_INIT_VISUAL_CHECK='enforce', VIO_BOOTSTRAP_RETAIN_MAP='1')
     return env
@@ -76,7 +76,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-root', type=Path, required=True)
     parser.add_argument('--output-root', type=Path, required=True)
-    parser.add_argument('--version',action='version',version='runtime_reduced_v1.36')
+    parser.add_argument('--version',action='version',version='runtime_reduced_v1.37')
     parser.add_argument('--time-profile',help='Explicit validated timing profile name from time_profiles.json')
     parser.add_argument('--sequence', help='Recording prefix when data-root contains several recordings')
     parser.add_argument('--check-only', action='store_true')

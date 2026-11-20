@@ -1,0 +1,62 @@
+--- a/cunls/minimizer/sparse_matrix.cu
++++ b/cunls/minimizer/sparse_matrix.cu
+@@ -19,7 +19,7 @@
+ #include <thrust/copy.h>
+ #include <thrust/count.h>
+ #include <thrust/device_ptr.h>
+-#include <thrust/extrema.h>
++#include <thrust/reduce.h>
+ #include <thrust/fill.h>
+ #include <thrust/functional.h>
+ #include <thrust/gather.h>
+@@ -28,6 +28,7 @@
+ #include <thrust/transform.h>
+ 
+ #include <cassert>
++#include <limits>
+ 
+ #include "cunls/common/cusparse_helper.h"
+ #include "cunls/minimizer/device_reduction.h"
+@@ -62,10 +63,13 @@
+ 
+   auto stream_policy = thrust::cuda::par_nosync.on(stream);
+   thrust::device_ptr<const int> col_ids_ptr(matrix.col_ids.data());
+-  auto max_col_idx_it = thrust::max_element(stream_policy, col_ids_ptr,
+-                                            col_ids_ptr + num_nonzeros);
++  // Only the value is needed. CUDA 12 Thrust argmax creates an int/long
++  // temporary whose padding is read during copying (initcheck reports it).
++  // Scalar max reduction preserves dimensions and avoids that temporary.
++  const int max_col = thrust::reduce(stream_policy,col_ids_ptr,col_ids_ptr+num_nonzeros,
++                                    std::numeric_limits<int>::lowest(),thrust::maximum<int>());
+   THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
+-  num_cols = *max_col_idx_it + 1;
++  num_cols = max_col + 1;
+   assert(num_cols > 0);
+ }
+ 
+@@ -451,6 +455,10 @@
+   auto cusparse_handle = static_cast<cusparseHandle_t>(handle);
+ 
+   result.resize(transpose_matrix ? num_cols : num_rows);
++  // beta=0 specifies an overwrite. The deployed cuSPARSE scaling kernel
++  // nevertheless reads the destination. Clear it on this stream to make
++  // that read defined; the poison-output test verifies the overwrite result.
++  THROW_ON_CUDA_ERROR(cudaMemsetAsync(result.data(),0,result.size()*sizeof(float),stream));
+   assert(x.size() ==
+          static_cast<size_t>(transpose_matrix ? num_rows : num_cols));
+ 
+@@ -576,11 +584,11 @@
+                        NotEqualOperator<-1>());
+ 
+   thrust::device_ptr<const int> row_ids_ptr(row_ids.data());
+-  auto max_row_idx_it = thrust::max_element(stream_policy, row_ids_ptr,
+-                                            row_ids_ptr + num_triplets);
++  const int max_row = thrust::reduce(stream_policy,row_ids_ptr,row_ids_ptr+num_triplets,
++                                    std::numeric_limits<int>::lowest(),thrust::maximum<int>());
+   THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
+ 
+-  int num_rows = *max_row_idx_it + 1;
++  int num_rows = max_row + 1;
+   assert(num_rows > 0);
+ 
+   // Allocate CSR arrays

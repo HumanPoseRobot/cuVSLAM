@@ -18,8 +18,8 @@
 #pragma once
 
 #include <optional>
-#include "pipelines/gpu_window/window_backend.h"
 #include <vector>
+#include "pipelines/gpu_window/window_backend.h"
 
 #include "camera/observation.h"
 #include "camera/rig.h"
@@ -36,12 +36,13 @@
 #include "map/keyframe.h"
 #include "map/map.h"
 #include "map/plane_map.h"
+#include "pnp/geometry_profile.h"
 #include "pnp/multisensor_pose_estimator.h"
 #include "profiler/profiler.h"
 #include "sof/sof_multicamera_interface.h"
 
-#include "pipelines/tracker_state_machine.h"
 #include "pipelines/inertial_pnp.h"
+#include "pipelines/tracker_state_machine.h"
 
 namespace cuvslam::pipelines {
 
@@ -83,8 +84,8 @@ public:
   // (from the solve) and velocity/biases (from prev_pose + visual delta).
   bool solve_inertial(const std::unordered_map<TrackId, Vector3T>& landmarks,
                       const std::vector<camera::Observation>& observations, const pnp::RGBDInfos& depth_infos,
-                      const std::vector<map::Plane>& planes, const std::vector<Vector3T>& depth_points,
-                      int64_t time_ns, const InertialPnPSettings& settings, bool interval_healthy, bool is_keyframe);
+                      const std::vector<map::Plane>& planes, const std::vector<Vector3T>& depth_points, int64_t time_ns,
+                      const InertialPnPSettings& settings, bool interval_healthy, bool is_keyframe);
 
   // Pure-visual RGBD solve while IMU is still uninitialized. Same data flow, just without the IMU
   // SE3 prior factor.
@@ -127,9 +128,7 @@ public:
   // Publishing is suspended after the short prediction budget. A healthy
   // propagated state can still re-acquire the old map until the IMU state
   // machine reaches its existing integration timeout.
-  bool can_reacquire_after_loss() const {
-    return guard_exhausted_ && can_seed_recovery();
-  }
+  bool can_reacquire_after_loss() const { return guard_exhausted_ && can_seed_recovery(); }
   struct RecoveryAnchor {
     int64_t time_ns;
     sba_imu::Pose pose;
@@ -138,17 +137,15 @@ public:
     std::vector<camera::Observation> observations;
   };
   std::optional<RecoveryAnchor> recovery_anchor;
-  bool can_seed_recovery() const {
-    return guard_internal_prediction_ && sm_.state() == StateMachine::State::Ok;
-  }
+  bool can_seed_recovery() const { return guard_internal_prediction_ && sm_.state() == StateMachine::State::Ok; }
   const sba_imu::Pose& propagated_pose() const { return prev_pose_; }
   void commit_recovery_anchor(int64_t current_time_ns);
   Isometry3T recovery_rig_pose() const { return prev_pose_.w_from_imu * calib_.rig_from_imu().inverse(); }
   bool validate_recovery_seed(const map::Map<TrackId, Vector3T>& points,
-                              const std::vector<camera::Observation>& observations,
-                              int required, int64_t time_ns) const;
-  void set_init_observation_requirement(size_t required) { init_observation_requirement_=required; }
-  bool defer_bootstrap_failure(int64_t time_ns,const StateMachineSettings& settings);
+                              const std::vector<camera::Observation>& observations, int required,
+                              int64_t time_ns) const;
+  void set_init_observation_requirement(size_t required) { init_observation_requirement_ = required; }
+  bool defer_bootstrap_failure(int64_t time_ns, const StateMachineSettings& settings);
   Isometry3T accepted_working_rig_pose() const { return curr_pose_.w_from_imu * calib_.rig_from_imu().inverse(); }
   Vector3T velocity() const { return prev_pose_.velocity; }
   Vector3T gyro_bias() const { return prev_pose_.gyro_bias; }
@@ -168,6 +165,7 @@ private:
   const camera::Rig& rig_;
   imu::ImuCalibration calib_;
   const pnp::MultisensorPoseEstimator& pose_estimator_;
+  pnp::GeometryProfile geometry_profile_;
   imu::ImuMeasurementStorage imu_storage_;
 
   sba_imu::InertialOptimizer optimizer_;
@@ -176,15 +174,16 @@ private:
 
   std::shared_ptr<sba_imu::WindowBackend> window_;
   struct InitVisualWitness {
-    int64_t time_ns; Isometry3T world_from_rig;
-    std::unordered_map<TrackId,Vector3T> points;
+    int64_t time_ns;
+    Isometry3T world_from_rig;
+    std::unordered_map<TrackId, Vector3T> points;
     std::vector<camera::Observation> observations;
   };
   std::optional<InitVisualWitness> init_visual_witness_;
   // Extra initialization admission applies only to a bootstrap whose history
   // was changed by fallback/recovery. Never perturb the ordinary good path.
-  bool bootstrap_recovered_=false;
-  size_t init_observation_requirement_=0;
+  bool bootstrap_recovered_ = false;
+  size_t init_observation_requirement_ = 0;
   bool guard_prediction_only_ = false, guard_exhausted_ = false, guard_internal_prediction_ = false;
   double guard_rejected_s_ = 0;
   bool joint_enabled_ = false;

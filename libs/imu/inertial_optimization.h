@@ -54,6 +54,7 @@ public:
   [[nodiscard]] const Vector3T& get_default_gravity() const { return default_gravity; }
 
 private:
+  friend struct InertialOptimizerMathAccess;
   float calc_cost_with_update(const std::vector<Pose>& poses, const Matrix3T& Rgravity, const Vector3T& gyro_bias,
                               const Vector3T& acc_bias, const Eigen::VectorXf& updates, float robustifier) const;
 

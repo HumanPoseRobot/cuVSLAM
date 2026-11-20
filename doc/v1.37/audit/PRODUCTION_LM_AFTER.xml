@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="4" failures="0" disabled="0" errors="0" time="0.034" timestamp="2026-11-20T19:02:08.898" name="AllTests">
+  <testsuite name="InitializationMath" tests="2" failures="0" disabled="0" skipped="0" errors="0" time="0.03" timestamp="2026-11-20T19:02:08.898">
+    <testcase name="ProductionCostGradientAndGaussNewtonMatchIndependentDoubleDifferences" file="/tmp/source_ray_uncertainty_20261120/src/libs/imu/test/init_math_test.cpp" line="25" status="run" result="completed" time="0." timestamp="2026-11-20T19:02:08.898" classname="InitializationMath">
+      <properties>
+        <property name="quadratic_hessian_relative" value="5.928465143728098e-08"/>
+        <property name="quadratic_gradient_relative" value="8.1857352528385607e-07"/>
+        <property name="quadratic_cost_gradient_max_relative" value="1.7955899238586426e-05"/>
+        <property name="huber_hessian_relative" value="4.328505983853527e-08"/>
+        <property name="huber_gradient_relative" value="8.1773733260832765e-07"/>
+        <property name="huber_cost_gradient_max_relative" value="1.8805265426635742e-05"/>
+      </properties>
+    </testcase>
+    <testcase name="ActualOptimizerUsesTheVerifiedSymmetricModelByDefault" file="/tmp/source_ray_uncertainty_20261120/src/libs/imu/test/init_math_test.cpp" line="120" status="run" result="completed" time="0.026" timestamp="2026-11-20T19:02:08.902" classname="InitializationMath">
+      <properties>
+        <property name="standard_production_lm_max_relative" value="1.2579860153572042e-08"/>
+        <property name="standard_production_lm_audit" value="/tmp/cuvslam_production_lm_858808282041234"/>
+        <property name="adaptive_production_lm_max_relative" value="1.2579860153572042e-08"/>
+        <property name="adaptive_production_lm_audit" value="/tmp/cuvslam_production_lm_858808298099938"/>
+      </properties>
+    </testcase>
+  </testsuite>
+  <testsuite name="ClosedFormMath" tests="2" failures="0" disabled="0" skipped="0" errors="0" time="0.003" timestamp="2026-11-20T19:02:08.928">
+    <testcase name="ConstantTurnMatchesIndependentScalarIntegrals" file="/tmp/source_ray_uncertainty_20261120/src/libs/imu/test/closed_form_math_test.cpp" line="5" status="run" result="completed" time="0." timestamp="2026-11-20T19:02:08.928" classname="ClosedFormMath" />
+    <testcase name="BiasJacobiansMatchIndependentDoubleIntegration" file="/tmp/source_ray_uncertainty_20261120/src/libs/imu/test/closed_form_math_test.cpp" line="25" status="run" result="completed" time="0.003" timestamp="2026-11-20T19:02:08.928" classname="ClosedFormMath">
+      <properties>
+        <property name="float_reintegration_difference_max_relative" value="0.002512225497111201"/>
+        <property name="independent_double_bias_jacobian_max_relative" value="5.087252060847132e-07"/>
+      </properties>
+    </testcase>
+  </testsuite>
+</testsuites>
