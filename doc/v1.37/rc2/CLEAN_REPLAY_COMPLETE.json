@@ -1,0 +1,16 @@
+{
+  "core_sha256": "60d3d710dae2d8d9d3b9ec0e988a27c9f6075554f84a119498b8ef956d721222",
+  "full_source_rebuild": true,
+  "complete_sequence": "room5",
+  "frames": 2846,
+  "state_field_bytes_equal": {
+    "timestamp_ns": true,
+    "poses": true,
+    "observations": true
+  },
+  "input_hash_equal": true,
+  "timing_fields_excluded": [
+    "track_ms"
+  ],
+  "note": "Initial verifier incorrectly required timing measurements to be bit-identical; replay itself completed successfully. This verifier compares every state/observation field and timestamps, excludes measured runtime. No replay result was substituted or regenerated."
+}

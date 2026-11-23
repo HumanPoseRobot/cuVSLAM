@@ -26,10 +26,16 @@ Step Solve(const std::vector<Rows>& blocks, double lambda);
 // correlated map uncertainty. Latent corrections never modify the public map.
 class GeometryProfile {
 public:
+  enum class PriorMean { Conditional, PreserveMap };
   void reset();
   bool refine(const map::UnifiedMap&, const camera::Rig&, const std::unordered_map<TrackId, Vector3T>&,
               const std::vector<camera::Observation>&, size_t required, bool source_ray, int64_t time_ns,
               Isometry3T& rig_from_world, Matrix6T* information = nullptr);
+  // Attribution control: PreserveMap retains history information but centers its mean
+  // on the supplied map point. This is a different model, not a correctness fix.
+  bool refineWithPriorMean(const map::UnifiedMap&, const camera::Rig&, const std::unordered_map<TrackId, Vector3T>&,
+                           const std::vector<camera::Observation>&, size_t required, bool source_ray, int64_t time_ns,
+                           Isometry3T& rig_from_world, Matrix6T* information, PriorMean mean);
 
 private:
   struct Prior {

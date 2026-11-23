@@ -1,0 +1,13 @@
+{
+  "experimental": true,
+  "published_release_modified": false,
+  "base_commit": "fe5f5b40308a88416379dddb4236ee705cecea6b",
+  "core_sha256": "60d3d710dae2d8d9d3b9ec0e988a27c9f6075554f84a119498b8ef956d721222",
+  "default_prior_mean": "conditional",
+  "geometry_default": "disabled in published release",
+  "full_ctest_groups_passed": 22,
+  "fixed_input_cases_passed": 11,
+  "full_pnp_passed": 33,
+  "full_pnp_skipped": 1,
+  "clean_room5_state_bit_exact": true
+}

@@ -1,0 +1,6 @@
+{
+  "libs/pnp/geometry_profile.cpp": "f76ba3d4def3f22d997d346de139d1a90061fb2d1a87ec4411093c7d5b9ff1d4",
+  "libs/pnp/geometry_profile.h": "255a62e36744ddd3bd807b8b1460a919c552ef7a2a2c85a90af4acea815caa5f",
+  "libs/pnp/test/CMakeLists.txt": "aba4690cac40c4be4901447518491ac3976e8c3570a4f29173b0cee9c7bc697f",
+  "libs/pnp/test/geometry_cache_fix_test.cpp": "35232ba3cd7dae21c56e5b3d2b6284c3580cad959dbe0217cfa762d89801fa5e"
+}

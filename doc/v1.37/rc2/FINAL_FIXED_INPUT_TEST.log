@@ -1,0 +1,43 @@
+Note: Google Test filter = GeometryCacheAudit.*:GeometryMeanMath.*:GeometryProfile.*:PixelSupport.*:VisualInformation.*
+[==========] Running 11 tests from 5 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from GeometryProfile
+[ RUN      ] GeometryProfile.PointEliminationMatchesFullJointDampedQR
+[       OK ] GeometryProfile.PointEliminationMatchesFullJointDampedQR (0 ms)
+[ RUN      ] GeometryProfile.StereoHistoryRefinesPoseWithoutWritingLandmarks
+[       OK ] GeometryProfile.StereoHistoryRefinesPoseWithoutWritingLandmarks (7 ms)
+[----------] 2 tests from GeometryProfile (11 ms total)
+
+[----------] 1 test from PixelSupport
+[ RUN      ] PixelSupport.NativeFisheyeUsesActualPixelDistanceAtImagePeriphery
+[       OK ] PixelSupport.NativeFisheyeUsesActualPixelDistanceAtImagePeriphery (0 ms)
+[----------] 1 test from PixelSupport (0 ms total)
+
+[----------] 4 tests from GeometryCacheAudit
+[ RUN      ] GeometryCacheAudit.ExistingKeyframePoseCorrectionMustInvalidatePrior
+[       OK ] GeometryCacheAudit.ExistingKeyframePoseCorrectionMustInvalidatePrior (13 ms)
+[ RUN      ] GeometryCacheAudit.ExistingLandmarkCorrectionMustInvalidatePrior
+[       OK ] GeometryCacheAudit.ExistingLandmarkCorrectionMustInvalidatePrior (12 ms)
+[ RUN      ] GeometryCacheAudit.ExistingCalibrationCorrectionMustInvalidatePrior
+[       OK ] GeometryCacheAudit.ExistingCalibrationCorrectionMustInvalidatePrior (11 ms)
+[ RUN      ] GeometryCacheAudit.PriorMeanControlSameMapInputAndInitial
+[       OK ] GeometryCacheAudit.PriorMeanControlSameMapInputAndInitial (9 ms)
+[----------] 4 tests from GeometryCacheAudit (46 ms total)
+
+[----------] 1 test from GeometryMeanMath
+[ RUN      ] GeometryMeanMath.CenteredPriorEqualsCorrelatedCovarianceMarginalization
+[       OK ] GeometryMeanMath.CenteredPriorEqualsCorrelatedCovarianceMarginalization (0 ms)
+[----------] 1 test from GeometryMeanMath (11 ms total)
+
+[----------] 3 tests from VisualInformation
+[ RUN      ] VisualInformation.InversionAndLeverArmMatchIndependentBodyFiniteDifferences
+[       OK ] VisualInformation.InversionAndLeverArmMatchIndependentBodyFiniteDifferences (0 ms)
+[ RUN      ] VisualInformation.NonfiniteInformationIsNotHidden
+[       OK ] VisualInformation.NonfiniteInformationIsNotHidden (0 ms)
+[ RUN      ] VisualInformation.IndependentMeasurementsAddInformationWithoutSolverAveraging
+[       OK ] VisualInformation.IndependentMeasurementsAddInformationWithoutSolverAveraging (0 ms)
+[----------] 3 tests from VisualInformation (22 ms total)
+
+[----------] Global test environment tear-down
+[==========] 11 tests from 5 test suites ran. (92 ms total)
+[  PASSED  ] 11 tests.

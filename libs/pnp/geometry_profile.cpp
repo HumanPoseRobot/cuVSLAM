@@ -195,9 +195,13 @@ void GeometryProfile::update(const map::UnifiedMap& map, const camera::Rig& rig)
     return;
   }
   const auto stamp = sub.consecutive_keyframes.back().keyframe->time_ns();
-  if (stamp == map_time_) {
-    return;
-  }
+  // A keyframe timestamp is not a map revision: existing poses, landmarks,
+  // observations or rig calibration can change without appending a keyframe.
+  // Rebuild from the current call rather than reusing a stale conditional prior.
+  // The caller must serialize map writes during this read, as for the existing
+  // PnP/map snapshot path. Per-object locks do not provide a graph-wide epoch.
+  const auto previous_stamp = map_time_;
+  auto previous_priors = std::move(priors_);
   map_time_ = stamp;
   priors_.clear();
   struct History {
@@ -272,11 +276,56 @@ void GeometryProfile::update(const map::UnifiedMap& map, const camera::Rig& rig)
     p.chart = h.chart;
     priors_.emplace(id, p);
   }
+  if (std::getenv("VIO_GEOMETRY_MEAN_AUDIT")) {
+    size_t changed = 0;
+    for (const auto& [id, prior] : priors_) {
+      const auto old = previous_priors.find(id);
+      if (old == previous_priors.end() || (prior.origin.array() != old->second.origin.array()).any() ||
+          (prior.rows.array() != old->second.rows.array()).any() ||
+          (prior.residual.array() != old->second.residual.array()).any()) {
+        ++changed;
+      }
+    }
+    for (const auto& [id, prior] : previous_priors) {
+      if (priors_.find(id) == priors_.end()) {
+        ++changed;
+      }
+    }
+    TraceMessage("GEOMETRY_PRIOR_REBUILD stamp=%lld same_stamp=%d previous=%zu current=%zu changed=%zu",
+                 (long long)stamp, int(previous_stamp == stamp), previous_priors.size(), priors_.size(), changed);
+  }
 }
 bool GeometryProfile::refine(const map::UnifiedMap& map, const camera::Rig& rig,
                              const std::unordered_map<TrackId, Vector3T>& landmarks,
                              const std::vector<camera::Observation>& observations, size_t required, bool source_ray,
                              int64_t time_ns, Isometry3T& output, Matrix6T* information) {
+  if (std::getenv("VIO_GEOMETRY_MEAN_AUDIT")) {
+    auto centered = output;
+    Matrix6T centered_information = Matrix6T::Zero();
+    const bool centered_ok = refineWithPriorMean(map, rig, landmarks, observations, required, source_ray, time_ns,
+                                                 centered, &centered_information, PriorMean::PreserveMap);
+    const auto input = output;
+    const bool accepted = refineWithPriorMean(map, rig, landmarks, observations, required, source_ray, time_ns, output,
+                                              information, PriorMean::Conditional);
+    const Eigen::Vector3d conditional_delta =
+        output.inverse().translation().cast<double>() - input.inverse().translation().cast<double>();
+    const Eigen::Vector3d centered_delta =
+        centered.inverse().translation().cast<double>() - input.inverse().translation().cast<double>();
+    TraceMessage(
+        "GEOMETRY_MEAN_PAIR t=%lld conditional_accept=%d centered_accept=%d "
+        "conditional_dxyz=%.12g,%.12g,%.12g centered_dxyz=%.12g,%.12g,%.12g",
+        (long long)time_ns, int(accepted), int(centered_ok), conditional_delta.x(), conditional_delta.y(),
+        conditional_delta.z(), centered_delta.x(), centered_delta.y(), centered_delta.z());
+    return accepted;
+  }
+  return refineWithPriorMean(map, rig, landmarks, observations, required, source_ray, time_ns, output, information,
+                             PriorMean::Conditional);
+}
+bool GeometryProfile::refineWithPriorMean(const map::UnifiedMap& map, const camera::Rig& rig,
+                                          const std::unordered_map<TrackId, Vector3T>& landmarks,
+                                          const std::vector<camera::Observation>& observations, size_t required,
+                                          bool source_ray, int64_t time_ns, Isometry3T& output, Matrix6T* information,
+                                          PriorMean mean) {
   const auto started = std::chrono::steady_clock::now();
   update(map, rig);
   std::map<TrackId, Group> by_id;
@@ -301,6 +350,11 @@ bool GeometryProfile::refine(const map::UnifiedMap& map, const camera::Rig& rig,
         g.prior = prior->second.rows;
         g.offset = prior->second.residual;
         g.prior_origin = prior->second.origin;
+        if (mean == PriorMean::PreserveMap) {
+          // Exact recentering: R * (X - origin) + offset == R * (X - base).
+          // Keep the same rows/information; alter only the prior's center.
+          g.offset = -g.prior * (g.base - g.prior_origin);
+        }
         g.chart = prior->second.chart;
         g.ray = source_ray;
         // The chart must start at this call's exact map point.
@@ -514,10 +568,10 @@ bool GeometryProfile::refine(const map::UnifiedMap& map, const camera::Rig& rig,
   const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
   TraceMessage(
       "GEOMETRY_PROFILE t=%lld accept=%d ray=%d points=%zu uncertain=%zu before=%.12g after=%.12g support=%zu->%zu "
-      "rank=%d dp=%.9g iterations=%d ms=%.6f",
+      "rank=%d dp=%.9g iterations=%d ms=%.6f prior_mean=%s",
       (long long)time_ns, int(accepted), int(source_ray), groups.size(), uncertain, before, current, before_support,
-      after_support, int(rank), (pose.inverse().translation() - initial.inverse().translation()).norm(), iterations,
-      ms);
+      after_support, int(rank), (pose.inverse().translation() - initial.inverse().translation()).norm(), iterations, ms,
+      mean == PriorMean::Conditional ? "conditional" : "map");
   if (accepted) {
     if (information && !posterior.cast<float>().allFinite()) {
       return false;
