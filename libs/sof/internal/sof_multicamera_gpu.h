@@ -53,7 +53,7 @@ public:
 private:
   struct PrimaryToSecondaryGPUTracker {
     std::unique_ptr<GPULKFeatureTracker> tracker;
-    GPUSTFeatureTracker calibrated_tracker{20, 0};
+    GPUSTFeatureTracker calibrated_tracker{10, 10};
     GPUArrayPinned<TrackData> calibrated_tracks{1000};
     GPUArrayPinned<int> calibrated_indices{1000};
     std::vector<int> calibrated_lookup;

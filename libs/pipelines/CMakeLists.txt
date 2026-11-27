@@ -62,7 +62,8 @@ endif()
 # also gated here because it includes pnp/multisensor_pose_estimator.h for the RGBDInfo struct.
 if(USE_CUNLS)
     enable_language(CUDA)
-    set(SOURCES ${SOURCES} gpu_window/window_backend.cpp gpu_window/window_gpu.cu gpu_window/window_cpu.cpp gpu_window/window_fp64.cpp gpu_window/window_fp64_gpu.cu
+    set(SOURCES ${SOURCES} gpu_window/window_backend.cpp gpu_window/window_geometry_seed.cpp gpu_window/joint_posterior.cpp gpu_window/joint_initial_graph.cpp
+    gpu_window/joint_online.cpp gpu_window/history_archive.cpp gpu_window/window_gpu.cu gpu_window/window_cpu.cpp gpu_window/window_fp64.cpp gpu_window/window_fp64_gpu.cu
         gpu_window/gpu_joint_adapter.cpp gpu_window/gpu_joint_ad.cu gpu_window/gpu_bias_rw_adapter.cpp gpu_window/gpu_bias_rw.cu)
     set(LIBS ${LIBS} cunls::cunls)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/gpu_window)
@@ -138,4 +139,43 @@ endif()
 if(USE_CUNLS)
  add_executable(bias_condition_probe gpu_window/bias_condition_probe.cpp)
  target_link_libraries(bias_condition_probe PRIVATE pipelines)
+endif()
+
+if(USE_CUNLS)
+ add_executable(joint_geometry_window_test gpu_window/window_joint_reference_test.cpp)
+ target_link_libraries(joint_geometry_window_test PRIVATE pipelines testing)
+ target_compile_options(joint_geometry_window_test PRIVATE -UNDEBUG)
+ add_test(NAME joint_geometry_window_test COMMAND joint_geometry_window_test)
+endif()
+
+if(USE_CUNLS)
+    add_executable(joint_posterior_test gpu_window/joint_posterior_test.cpp)
+    target_link_libraries(joint_posterior_test PRIVATE pipelines testing)
+    target_compile_options(joint_posterior_test PRIVATE -UNDEBUG)
+    add_test(NAME joint_posterior_test COMMAND joint_posterior_test)
+endif()
+
+if(USE_CUNLS)
+    add_executable(verify_frozen_graph gpu_window/verify_frozen_graph.cpp)
+    target_link_libraries(verify_frozen_graph PRIVATE pipelines)
+endif()
+
+if(USE_CUNLS)
+    add_executable(profile_posterior_graph gpu_window/profile_posterior_graph.cpp)
+    target_link_libraries(profile_posterior_graph PRIVATE pipelines)
+endif()
+
+# rc3: build the verified mathematical regressions without embedding private fixtures.
+if(USE_CUNLS)
+    add_executable(history_archive_test gpu_window/test/history_archive_test.cpp)
+    target_link_libraries(history_archive_test PRIVATE pipelines)
+    target_compile_options(history_archive_test PRIVATE -UNDEBUG)
+    add_test(NAME history_archive_test COMMAND history_archive_test)
+    foreach(name history_actual_math observed_history_query_test correctness_regression)
+        add_executable(${name} gpu_window/test/${name}.cpp)
+        target_link_libraries(${name} PRIVATE pipelines)
+        target_compile_options(${name} PRIVATE -UNDEBUG)
+    endforeach()
+    # Actual-recording fixture tests are invoked explicitly with operator paths.
+    # Never couple ordinary CTest to a user-specific shared-drive dataset.
 endif()

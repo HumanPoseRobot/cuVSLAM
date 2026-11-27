@@ -370,6 +370,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   }
   auto frame = imu_->finalize_frame(pnp_result, prep.no_drops, time_ns, frameState, solver_settings.sm, bootstrap);
   const bool just_initialized = bootstrap && map_.get_gravity().has_value();
+  const bool posterior_initial_key = just_initialized && std::getenv("VIO_POSTERIOR_TRANSFER");
   world_from_rig = frame.world_from_rig;
   static_info_exp = frame.static_info_exp;
   prev_rig_from_world_ = world_from_rig.inverse();
@@ -423,7 +424,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
   const bool ready = temporal_audit_ && pnp_result && prep.no_drops &&
                      prep.imu_state == StateMachine::State::Ok &&
                      std::none_of(depth_infos.begin(),depth_infos.end(),[](auto p){ return p != nullptr; });
-  const bool online_temporal = std::getenv("CUVSLAM_ONLINE_TEMPORAL") != nullptr;
+  const bool online_temporal = std::getenv("CUVSLAM_ONLINE_TEMPORAL") && !(std::getenv("VIO_POSTERIOR_TRANSFER") && map_.get_gravity());
   const bool recoverable_loss = frame.lost && imu_->can_reacquire_after_loss();
   if ((!online_temporal && (!ready || !temporal_ready_)) || (frame.lost && !recoverable_loss)) {
     temporal_.clear();
@@ -444,7 +445,7 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
 
   RERUN(logCameraFrustums, rig_, world_from_rig, "world/frustums");
 
-  if (frameState == sof::FrameState::Key && imu_->allow_map_update()) {
+  if ((frameState == sof::FrameState::Key || posterior_initial_key) && imu_->allow_map_update()) {
     map::State state = imu_->build_keyframe_state(prev_rig_from_world_, frame.lost);
     process_keyframe(time_ns, world_from_rig, obs_vector_, depth_infos, state, imu_->last_kf_preint(),
                      solver_settings.sba, !just_initialized && !imu_->window_active());
@@ -455,11 +456,14 @@ bool SolverSfMMultisensor::solveNextFrameInertial(int64_t time_ns, const sof::Fr
       temporal_.clear();
       return false;
     }
+    if (std::getenv("VIO_POSTERIOR_TRANSFER") && imu_->read_committed_state(time_ns, world_from_rig, static_info_exp)) {
+      prev_rig_from_world_ = world_from_rig.inverse();
+    }
     if (!online_temporal || just_initialized) temporal_.clear();
   }
   if (online_temporal && pnp_result && prep.no_drops && imu_->allow_map_update())
     temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,~0u);
-  if (temporal_ready_ && !online_temporal) temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,12u);
+  if (temporal_ready_ && !online_temporal && !(std::getenv("VIO_POSTERIOR_TRANSFER") && map_.get_gravity())) temporal_.remember(time_ns,rig_,world_from_rig,obs_vector_,12u);
 
   if (tracks2d && tracks3d) {
     TRACE_EVENT export_ev = profiler_domain_.trace_event("exportTracks");
@@ -482,12 +486,12 @@ void SolverSfMMultisensor::process_keyframe(int64_t time_ns, const Isometry3T& w
     landmarks = depth_maps_.build_keyframe_landmarks(world_from_rig, obs, depth_infos);
   }
 
-  if (std::getenv("CUVSLAM_ONLINE_TEMPORAL")) {
+  if (std::getenv("CUVSLAM_ONLINE_TEMPORAL") && !(std::getenv("VIO_POSTERIOR_TRANSFER") && map_.get_gravity())) {
     const size_t before = landmarks.size();
     temporal_.extend(time_ns, rig_, world_from_rig, obs, recent_landmarks_, ~0u,
                      true, 2.f, 1.75f, landmarks);
     TraceMessage("ONLINE_TEMPORAL t=%lld added=%zu", (long long)time_ns, landmarks.size()-before);
-  } else if (temporal_ready_) {
+  } else if (temporal_ready_ && !(std::getenv("VIO_POSTERIOR_TRANSFER") && map_.get_gravity())) {
     // Slots 2,3 are physical cameras 0,1 in the experimental rig [2,3,0,1].
     temporal_.extend(time_ns, rig_, world_from_rig, obs, recent_landmarks_, 12u, temporal_insert_,
                      temporal_strict_ ? 4.f : 2.f, temporal_strict_ ? 1.f : 1.75f, landmarks);

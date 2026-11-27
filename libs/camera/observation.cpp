@@ -45,7 +45,7 @@ bool FindObservation(const std::vector<Observation>& observations, TrackId track
 // Creates a physically meaningful information matrix for 2D observations.
 Matrix2T GetDefaultObservationInfoUV() {
   // conservative estimate for the tracking noise on undistorted frame
-  constexpr auto stdPx = float{3};
+  constexpr auto stdPx = static_cast<float>(kDefaultObservationNoisePx);
 
   // information matrix in pixel space
   Matrix2T invSigma;

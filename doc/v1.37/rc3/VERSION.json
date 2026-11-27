@@ -1,0 +1,15 @@
+{
+  "version": "runtime_reduced_v1.37-rc3",
+  "branch": "codex/runtime-reduced-v1.37-rc3",
+  "base_commit": "b18815853c17ffc1c80742524e51b15ed55c41ee",
+  "base_version": "runtime_reduced_v1.37-rc2",
+  "qualified_core_sha256": "6c19a32afd35d42fc7bdfd4b9554fb10141afb5bf131e77fa3e4826c6b657970",
+  "profile": "correctness_base",
+  "historical_recovery_default": false,
+  "pgo": false,
+  "mask": "none",
+  "geometry": "native_fisheye",
+  "scope": "sealed new candidate snapshot, six full native512 room replays; not a universal accuracy improvement; later nonlinear-history prototypes excluded",
+  "runtime_package": "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/correctness_candidate_20261126",
+  "rebuild_scope": "committed backend plus sealed static inputs; no from-zero whole-project claim"
+}

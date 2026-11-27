@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "core_sha256": "6c19a32afd35d42fc7bdfd4b9554fb10141afb5bf131e77fa3e4826c6b657970",
+  "groups": 9,
+  "tests": [
+    {
+      "name": "synthetic_chain",
+      "returncode": 0
+    },
+    {
+      "name": "room6_information",
+      "returncode": 0
+    },
+    {
+      "name": "room6_query",
+      "returncode": 0
+    },
+    {
+      "name": "room2_information",
+      "returncode": 0
+    },
+    {
+      "name": "room2_query",
+      "returncode": 0
+    },
+    {
+      "name": "room5_information",
+      "returncode": 0
+    },
+    {
+      "name": "room5_query",
+      "returncode": 0
+    },
+    {
+      "name": "ownership_and_charts",
+      "returncode": 0
+    },
+    {
+      "name": "seal_guards",
+      "returncode": 0
+    }
+  ],
+  "scope": "fixed graphs, fault injections and immutable package guards; full-sequence accuracy pending"
+}

@@ -44,6 +44,8 @@
 #include "pipelines/inertial_pnp.h"
 #include "pipelines/tracker_state_machine.h"
 
+namespace gpu_window::posterior { class Online; struct CurrentFrame; }
+
 namespace cuvslam::pipelines {
 
 // ImuFusionContext owns the IMU-side state and operations that wrap the visual RGBD pose estimator
@@ -121,7 +123,7 @@ public:
 
   std::optional<Vector3T> get_gravity() const;
 
-  bool window_active() const { return window_ && joint_active_ && has_joint_prior_; }
+  bool window_active() const;
 
   bool has_imu_state() const { return !is_first_run_; }
   bool allow_map_update() const { return !guard_prediction_only_ && !guard_exhausted_; }
@@ -137,7 +139,7 @@ public:
     std::vector<camera::Observation> observations;
   };
   std::optional<RecoveryAnchor> recovery_anchor;
-  bool can_seed_recovery() const { return guard_internal_prediction_ && sm_.state() == StateMachine::State::Ok; }
+  bool can_seed_recovery() const { return !posterior_ && guard_internal_prediction_ && sm_.state() == StateMachine::State::Ok; }
   const sba_imu::Pose& propagated_pose() const { return prev_pose_; }
   void commit_recovery_anchor(int64_t current_time_ns);
   Isometry3T recovery_rig_pose() const { return prev_pose_.w_from_imu * calib_.rig_from_imu().inverse(); }
@@ -173,6 +175,8 @@ private:
   StateMachine sm_;
 
   std::shared_ptr<sba_imu::WindowBackend> window_;
+  std::shared_ptr<gpu_window::posterior::Online> posterior_;
+  std::shared_ptr<gpu_window::posterior::CurrentFrame> posterior_frame_;
   struct InitVisualWitness {
     int64_t time_ns;
     Isometry3T world_from_rig;

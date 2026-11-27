@@ -25,6 +25,7 @@
 #include "window_backend.h"
 #include "window_commit_validation.h"
 #include "window_fp64.h"
+#include "window_joint_reference.h"
 #include "window_linear.h"
 #include "window_math.h"
 #include "window_validation.h"
@@ -51,6 +52,7 @@ using Clock = std::chrono::steady_clock;
 double elapsed(Clock::time_point start) {
   return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
 }
+bool full_joint_window() { return std::getenv("VIO_WINDOW_JOINT_GEOMETRY") != nullptr; }
 int window_limit() {
   const char* value = std::getenv("CUVSLAM_WINDOW_SIZE");
   if (value && std::strcmp(value, "3") == 0) {
@@ -141,14 +143,38 @@ struct Node {
   int64_t t;
   Pose pose;
   std::vector<camera::Observation> observations;
+  bool map_frame = true;
 };
 struct Graph {
+  gpu_window::joint_reference::Prior joint_prior;
   std::vector<Node> nodes;
   std::map<TrackId, Vector3T> points;
   std::array<gpu_window::State, Slots> anchors{};
   WMatrix W = WMatrix::Zero(Dim, Dim);
   WVector c = WVector::Zero(Dim);
 };
+
+std::vector<int64_t> joint_times(const Graph& g) {
+  std::vector<int64_t> times;
+  for (const auto& n : g.nodes) {
+    times.push_back(n.t);
+  }
+  return times;
+}
+std::vector<int64_t> joint_ids(const std::vector<TrackId>& ids) {
+  std::vector<int64_t> labels;
+  for (auto id : ids) {
+    labels.push_back(static_cast<int64_t>(id));
+  }
+  return labels;
+}
+gpu_window::joint_reference::Linearization joint_rows(const WinProblem& p, const WinResult& r, const Graph& g,
+                                                      const std::vector<TrackId>& ids, bool boundary = false) {
+  const auto x = gpu_window::joint_reference::unpack(p, r);
+  const auto e = gpu_window::fp64::EvaluateHost(p, x, true);
+  return gpu_window::joint_reference::linearize(p, e, x, g.joint_prior, joint_times(g), joint_ids(ids), boundary);
+}
+
 struct MapSupport {
   int before = 0;
   int after = 0;
@@ -278,7 +304,9 @@ WinProblem pack(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig
   }
   std::map<TrackId, int> index;
   for (auto& kv : g.points) {
-    if (counts[kv.first] >= 2) {
+    if (counts[kv.first] >= 2 ||
+        (full_joint_window() && std::find(g.joint_prior.ids.begin(), g.joint_prior.ids.end(),
+                                          static_cast<int64_t>(kv.first)) != g.joint_prior.ids.end())) {
       index[kv.first] = ids.size();
       ids.push_back(kv.first);
       p.points.push_back({kv.second[0], kv.second[1], kv.second[2]});
@@ -354,6 +382,76 @@ WinProblem pack(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig
   }
   return p;
 }
+
+bool prepare_joint_retained(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig, const Vector3T& gravity,
+                            int iterations, double huber, int64_t t) {
+  if (g.nodes.size() != static_cast<size_t>(window_limit())) {
+    return true;
+  }
+  std::vector<TrackId> ids;
+  auto p = pack(g, cal, rig, gravity, iterations, huber, ids);
+  WinResult zero;
+  zero.points.resize(3 * ids.size());
+  const auto linear = joint_rows(p, zero, g, ids, true);
+  const int navigation = 15 * p.count;
+  std::set<TrackId> live;
+  for (size_t i = 1; i < g.nodes.size(); ++i) {
+    for (const auto& o : g.nodes[i].observations) {
+      live.insert(o.id);
+    }
+  }
+  std::vector<int> kept;
+  for (int i = 15; i < navigation; ++i) {
+    kept.push_back(i);
+  }
+  std::vector<int64_t> point_ids;
+  for (size_t i = 0; i < ids.size(); ++i) {
+    if (live.count(ids[i])) {
+      point_ids.push_back(static_cast<int64_t>(ids[i]));
+      for (int k = 0; k < 3; ++k) {
+        kept.push_back(navigation + 3 * i + k);
+      }
+    }
+  }
+  const auto start = Clock::now();
+  auto retained = cuvslam::pnp::joint_geometry::compress(cuvslam::pnp::joint_geometry::eliminate(linear.factor, kept));
+  if (!retained.valid()) {
+    return false;
+  }
+  gpu_window::joint_reference::Prior prior;
+  prior.factor = std::move(retained);
+  prior.absorbed_through_ns = g.nodes.front().t;
+  for (size_t i = 1; i < g.nodes.size(); ++i) {
+    prior.times.push_back(g.nodes[i].t);
+    prior.states.push_back(pack_state(g.nodes[i].pose));
+  }
+  prior.factor = gpu_window::joint_reference::Reanchor(prior.factor, prior.states);
+  prior.ids = point_ids;
+  for (auto id : point_ids) {
+    prior.points.push_back(g.points.at(TrackId(id)).cast<double>());
+  }
+  g.nodes.erase(g.nodes.begin());
+  std::set<int64_t> retained_ids(point_ids.begin(), point_ids.end());
+  for (auto it = g.points.begin(); it != g.points.end();) {
+    if (!retained_ids.count(static_cast<int64_t>(it->first))) {
+      it = g.points.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  // Only the departing frame's visual/IMU factors were absorbed. Retained
+  // observations remain raw evidence, and point-pose/point-point blocks persist.
+  g.joint_prior = std::move(prior);
+  g.W.setZero();
+  g.c.setZero();
+  for (size_t i = 0; i < g.nodes.size(); ++i) {
+    g.anchors[i] = pack_state(g.nodes[i].pose);
+  }
+  TraceMessage("JOINT_GEOMETRY_MARG t=%lld retained=%zu points=%zu dimension=%lld ms=%.6f", (long long)t,
+               g.nodes.size(), g.joint_prior.ids.size(), (long long)g.joint_prior.factor.rows.cols(), elapsed(start));
+  return true;
+}
+
 double cost(const WinEvaluation& e, double huber) {
   double s = 0;
   for (auto x : e.edge) {
@@ -374,6 +472,9 @@ double cost(const WinEvaluation& e, double huber) {
 // map or prior cannot subsequently be committed.
 bool prepare_retained(Graph& g, const imu::ImuCalibration& cal, const camera::Rig& rig, const Vector3T& gravity,
                       int iterations, double huber, int64_t t) {
+  if (full_joint_window()) {
+    return prepare_joint_retained(g, cal, rig, gravity, iterations, huber, t);
+  }
   if (g.nodes.size() == static_cast<size_t>(window_limit())) {
     std::vector<TrackId> ids;
     auto p = pack(g, cal, rig, gravity, iterations, huber, ids);
@@ -452,340 +553,380 @@ void WindowBackend::discard_pending() {
 }
 void WindowBackend::reset() { impl_ = std::make_unique<Impl>(); }
 bool WindowBackend::solve(const FrameInput& input, Pose& result) {
-  auto& map = input.map;
-  const auto& cal = input.calibration;
-  const auto& rig = input.rig;
-  const auto& storage = input.measurements;
-  const auto& landmarks = input.landmarks;
-  const auto& obs = input.observations;
-  const auto& gravity = input.gravity;
-  const auto& settings = input.settings;
-  const auto& previous = input.previous;
-  const auto& tracked = input.tracked;
-  const int64_t previous_t = input.previous_time_ns, t = input.time_ns;
-  if (!valid_state(pack_state(previous)) || !valid_state(pack_state(tracked)) || !tracked.info.allFinite() ||
-      !gravity.allFinite() || gravity.norm() < 1e-6) {
-    discard_pending();
-    TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=frame_input", (long long)t);
-    return false;
-  }
+  try {
+    auto& map = input.map;
+    const auto& cal = input.calibration;
+    const auto& rig = input.rig;
+    const auto& storage = input.measurements;
+    const auto& landmarks = input.landmarks;
+    const auto& obs = input.observations;
+    const auto& gravity = input.gravity;
+    const auto& settings = input.settings;
+    const auto& previous = input.previous;
+    const auto& tracked = input.tracked;
+    const int64_t previous_t = input.previous_time_ns, t = input.time_ns;
+    if (!valid_state(pack_state(previous)) || !valid_state(pack_state(tracked)) || !tracked.info.allFinite() ||
+        !gravity.allFinite() || gravity.norm() < 1e-6) {
+      discard_pending();
+      TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=frame_input", (long long)t);
+      return false;
+    }
 
-  discard_pending();
-  auto& d = *impl_;
-  if (previous_t < 0 || t <= previous_t) {
-    reset();
-    return false;
-  }
-  if (!d.active.nodes.empty() && (d.gravity - gravity).norm() > 1e-4) {
-    reset();
-    return solve(input, result);
-  }
-  if (!d.active.nodes.empty()) {
-    auto recent = map.get_recent_submap(20);
-    if (!recent.consecutive_keyframes.empty()) {
-      const int64_t published = recent.consecutive_keyframes.back().keyframe->time_ns();
-      if (published > d.active.nodes.back().t) {
-        // A rejected window leaves the validated frontend free to publish its
-        // keyframe. Do not bridge subsequent IMU factors across that skipped
-        // keyframe indefinitely using the old local linearization/prior.
-        // Re-seed from the authoritative published state, with a fresh prior.
-        TraceMessage("WINDOW_RESEED t=%lld reason=published_keyframe_ahead active=%lld published=%lld", (long long)t,
-                     (long long)d.active.nodes.back().t, (long long)published);
+    discard_pending();
+    auto& d = *impl_;
+    if (previous_t < 0 || t <= previous_t) {
+      reset();
+      return false;
+    }
+    if (!d.active.nodes.empty() && (d.gravity - gravity).norm() > 1e-4) {
+      reset();
+      return solve(input, result);
+    }
+    if (!d.active.nodes.empty()) {
+      auto recent = map.get_recent_submap(20);
+      if (!recent.consecutive_keyframes.empty()) {
+        const int64_t published = recent.consecutive_keyframes.back().keyframe->time_ns();
+        if (published > d.active.nodes.back().t) {
+          // A rejected window leaves the validated frontend free to publish its
+          // keyframe. Do not bridge subsequent IMU factors across that skipped
+          // keyframe indefinitely using the old local linearization/prior.
+          // Re-seed from the authoritative published state, with a fresh prior.
+          TraceMessage("WINDOW_RESEED t=%lld reason=published_keyframe_ahead active=%lld published=%lld", (long long)t,
+                       (long long)d.active.nodes.back().t, (long long)published);
+          reset();
+          return solve(input, result);
+        }
+      }
+      bool changed = false;
+      for (auto& k : recent.consecutive_keyframes) {
+        for (auto& n : d.active.nodes) {
+          if (k.keyframe->time_ns() != n.t) {
+            continue;
+          }
+          auto state = k.keyframe->get_state();
+          auto anchor = d.map_anchors.find(n.t);
+          if (anchor == d.map_anchors.end()) {
+            continue;
+          }
+          const auto& expected = anchor->second;
+          changed = changed || (state.rig_from_w.matrix() - expected.rig_from_w.matrix()).norm() > 1e-4f ||
+                    (state.velocity - expected.velocity).norm() > 1e-4f ||
+                    (state.gyro_bias - expected.gyro_bias).norm() > 1e-4f ||
+                    (state.acc_bias - expected.acc_bias).norm() > 1e-4f;
+        }
+      }
+      if (changed) {
+        TraceMessage("WINDOW_RESET reason=external_map_correction t=%lld", (long long)t);
         reset();
         return solve(input, result);
       }
     }
-    bool changed = false;
-    for (auto& k : recent.consecutive_keyframes) {
-      for (auto& n : d.active.nodes) {
-        if (k.keyframe->time_ns() != n.t) {
-          continue;
+    d.cal = cal;
+    d.rig = rig;
+    d.gravity = gravity;
+    d.iterations = settings.max_iteration;
+    d.huber = settings.robustifier_scale;
+    if (d.active.nodes.empty()) {
+      Node n{previous_t, previous, {}};
+      auto seed = map.get_recent_submap(1);
+      if (!seed.consecutive_keyframes.empty()) {
+        auto k = seed.consecutive_keyframes.back().keyframe;
+        auto state = k->get_state();
+        n.t = k->time_ns();
+        n.pose.w_from_imu = state.rig_from_w.inverse() * cal.rig_from_imu();
+        n.pose.velocity = state.velocity;
+        n.pose.gyro_bias = state.gyro_bias;
+        n.pose.acc_bias = state.acc_bias;
+        for (auto& row : seed.landmark_and_obs) {
+          for (auto& entry : row) {
+            auto point = entry.landmark->get_pose();
+            if (!point) {
+              continue;
+            }
+            d.active.points.emplace(entry.landmark->id(), *point);
+            for (auto& o : entry.observations) {
+              n.observations.push_back(o);
+            }
+          }
         }
-        auto state = k.keyframe->get_state();
-        auto anchor = d.map_anchors.find(n.t);
-        if (anchor == d.map_anchors.end()) {
-          continue;
+      }
+      d.active.nodes.push_back(n);
+      d.active.anchors[0] = pack_state(n.pose);
+      WVector diag(15);
+      diag << 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 25, 25, 25, 1e4, 1e4, 1e4, 25, 25, 25;
+      d.active.W.topLeftCorner(15, 15) = diag.cwiseSqrt().asDiagonal();
+      if (full_joint_window()) {
+        for (const auto& [id, point] : input.landmarks) {
+          d.active.points.emplace(id, point);
         }
-        const auto& expected = anchor->second;
-        changed = changed || (state.rig_from_w.matrix() - expected.rig_from_w.matrix()).norm() > 1e-4f ||
-                  (state.velocity - expected.velocity).norm() > 1e-4f ||
-                  (state.gyro_bias - expected.gyro_bias).norm() > 1e-4f ||
-                  (state.acc_bias - expected.acc_bias).norm() > 1e-4f;
+        if (!gpu_window::joint_reference::SeedHistoricalGeometry(map, rig, cal, n.t, pack_state(n.pose),
+                                                                 d.active.points, d.active.joint_prior)) {
+          TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=missing_joint_history_seed", (long long)t);
+          return false;
+        }
+        // All historical visual evidence through this keyframe is in the joint
+        // prior. Keep only the inherited velocity/bias engineering priors here.
+        d.active.nodes.front().observations.clear();
+        d.active.W.topLeftCorner(6, 15).setZero();
       }
     }
-    if (changed) {
-      TraceMessage("WINDOW_RESET reason=external_map_correction t=%lld", (long long)t);
+    Graph g = d.active;
+    auto& last = g.nodes.back();
+    if (t <= last.t) {
       reset();
-      return solve(input, result);
+      return false;
     }
-  }
-  d.cal = cal;
-  d.rig = rig;
-  d.gravity = gravity;
-  d.iterations = settings.max_iteration;
-  d.huber = settings.robustifier_scale;
-  if (d.active.nodes.empty()) {
-    Node n{previous_t, previous, {}};
-    auto seed = map.get_recent_submap(1);
-    if (!seed.consecutive_keyframes.empty()) {
-      auto k = seed.consecutive_keyframes.back().keyframe;
-      auto state = k->get_state();
-      n.t = k->time_ns();
-      n.pose.w_from_imu = state.rig_from_w.inverse() * cal.rig_from_imu();
-      n.pose.velocity = state.velocity;
-      n.pose.gyro_bias = state.gyro_bias;
-      n.pose.acc_bias = state.acc_bias;
-      for (auto& row : seed.landmark_and_obs) {
-        for (auto& entry : row) {
-          auto point = entry.landmark->get_pose();
-          if (!point) {
-            continue;
-          }
-          d.active.points.emplace(entry.landmark->id(), *point);
-          for (auto& o : entry.observations) {
-            n.observations.push_back(o);
-          }
+    last.pose.preintegration = IMUPreintegration(cal, storage, last.pose.gyro_bias, last.pose.acc_bias, last.t, t);
+    double dt = (t - last.t) * 1e-9;
+    if (std::abs(last.pose.preintegration.dT_s - dt) > 1e-5 || last.pose.preintegration.empty()) {
+      reset();
+      return false;
+    }
+    Pose predicted = tracked;
+    Node current{t, predicted, {}};
+    current.map_frame = input.is_keyframe;
+    const Isometry3T rig_from_world = cal.rig_from_imu() * predicted.w_from_imu.inverse();
+    std::set<std::pair<TrackId, int>> seen;
+    for (auto& o : obs) {
+      auto it = landmarks.find(o.id);
+      if (it == landmarks.end() || o.cam_id >= rig.num_cameras || !seen.emplace(o.id, int(o.cam_id)).second) {
+        continue;
+      }
+      auto point = g.points.count(o.id) ? g.points[o.id] : it->second;
+      if ((rig.camera_from_rig[o.cam_id] * rig_from_world * point).z() <= .05) {
+        continue;
+      }
+      g.points.emplace(o.id, point);
+      current.observations.push_back(o);
+    }
+    if (current.observations.size() < size_t(settings.min_observations)) {
+      return false;
+    }
+    g.nodes.push_back(current);
+    std::vector<TrackId> ids;
+    WinResult solved;
+    double after = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+      ids.clear();
+      auto p = pack(g, cal, rig, gravity, settings.max_iteration, settings.robustifier_scale, ids);
+      if (p.visuals.size() < size_t(settings.min_observations) ||
+          g.nodes.back().observations.size() < size_t(settings.min_observations)) {
+        return false;
+      }
+      if (const char* reason = invalid_problem(p)) {
+        TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=input reason=%s", (long long)t, reason);
+        return false;
+      }
+      const auto optimizer_start = Clock::now();
+      if (const char* directory = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_DIR")) {
+        // Capture immutable input before either optimizer or outlier pruning runs.
+        const char* low = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_MIN_NS");
+        const char* high = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_MAX_NS");
+        if ((!low || t >= std::strtoll(low, nullptr, 10)) && (!high || t <= std::strtoll(high, nullptr, 10))) {
+          std::string path =
+              std::string(directory) + "/window_" + std::to_string(t) + "_" + std::to_string(pass) + ".bin";
+          gpu_window::fp64::SaveProblem(p, path.c_str());
         }
       }
+      if (full_joint_window()) {
+        solved = gpu_window::joint_reference::optimize(p, g.joint_prior, joint_times(g), joint_ids(ids));
+      } else if (fp64_window()) {
+        solved = gpu_window::fp64::Optimize(p, fp64_gpu());
+      } else if (cpu_window()) {
+        solved = OptimizeCpu(p);
+      } else {
+        solved = schur_window() ? OptimizeSchur(p) : Optimize(p);
+      }
+      const double optimizer_ms = elapsed(optimizer_start);
+      TraceMessage("SCALE_SOLVE t=%lld pass=%d states=%d points=%zu obs=%zu ms=%.6f schur_ms=%.6f iterations=%d",
+                   (long long)t, pass, p.count, ids.size(), p.visuals.size(), optimizer_ms, solved.landmark_ms,
+                   solved.iterations);
+      if (!valid_result(solved, ids.size())) {
+        TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=result", (long long)t);
+        return false;
+      }
+      auto evaluation = evaluate_window(p, solved);
+      after = full_joint_window() ? joint_rows(p, solved, g, ids).cost : cost(evaluation, p.huber);
+      if (!std::isfinite(after) || after > solved.before + 1e-4 * std::max(1.f, solved.before)) {
+        TraceMessage("WINDOW_REJECT t=%lld reason=objective before=%.9g after=%.9g", (long long)t, solved.before,
+                     after);
+        return false;
+      }
+      for (size_t i = 0; i < g.nodes.size(); ++i) {
+        update_pose(g.nodes[i].pose, solved.x.data() + 15 * i);
+      }
+      for (size_t i = 0; i < ids.size(); ++i) {
+        for (int k = 0; k < 3; ++k) {
+          g.points[ids[i]][k] += solved.points[3 * i + k];
+        }
+      }
+      for (const auto& node : g.nodes) {
+        if (!valid_state(pack_state(node.pose))) {
+          TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=updated_pose", (long long)t);
+          return false;
+        }
+      }
+      for (const auto& point : g.points) {
+        if (!point.second.allFinite()) {
+          TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=updated_point", (long long)t);
+          return false;
+        }
+      }
+      int removed = 0, behind = 0;
+      // Classify individual reprojections, rather than rejecting a whole window
+      // because one triangulated outlier crosses the camera plane. 9.21 is the
+      // 99% two-dimensional Gaussian residual threshold under the same visual info.
+      for (auto& node : g.nodes) {
+        auto& observations = node.observations;
+        observations.erase(std::remove_if(observations.begin(), observations.end(),
+                                          [&](const auto& o) {
+                                            auto it = g.points.find(o.id);
+                                            if (it == g.points.end()) {
+                                              ++removed;
+                                              return true;
+                                            }
+                                            const Vector3T pc = rig.camera_from_rig[o.cam_id] * cal.rig_from_imu() *
+                                                                node.pose.w_from_imu.inverse() * it->second;
+                                            if (!pc.allFinite() || pc.z() <= .05f) {
+                                              ++removed;
+                                              ++behind;
+                                              return true;
+                                            }
+                                            if (!pnp::PixelObservationSupported(rig, o, pc, .05f)) {
+                                              ++removed;
+                                              return true;
+                                            }
+                                            return false;
+                                          }),
+                           observations.end());
+      }
+      TraceMessage("WINDOW_PRUNE t=%lld pass=%d removed=%d behind=%d current_obs=%zu", (long long)t, pass, removed,
+                   behind, g.nodes.back().observations.size());
+      if (g.nodes.back().observations.size() < size_t(settings.min_observations)) {
+        return false;
+      }
+      if (!removed) {
+        break;
+      }
     }
-    d.active.nodes.push_back(n);
-    d.active.anchors[0] = pack_state(n.pose);
-    WVector diag(15);
-    diag << 1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 25, 25, 25, 1e4, 1e4, 1e4, 25, 25, 25;
-    d.active.W.topLeftCorner(15, 15) = diag.cwiseSqrt().asDiagonal();
-  }
-  Graph g = d.active;
-  auto& last = g.nodes.back();
-  if (t <= last.t) {
-    reset();
-    return false;
-  }
-  last.pose.preintegration = IMUPreintegration(cal, storage, last.pose.gyro_bias, last.pose.acc_bias, last.t, t);
-  double dt = (t - last.t) * 1e-9;
-  if (std::abs(last.pose.preintegration.dT_s - dt) > 1e-5 || last.pose.preintegration.empty()) {
-    reset();
-    return false;
-  }
-  Pose predicted = tracked;
-  Node current{t, predicted, {}};
-  const Isometry3T rig_from_world = cal.rig_from_imu() * predicted.w_from_imu.inverse();
-  std::set<std::pair<TrackId, int>> seen;
-  for (auto& o : obs) {
-    auto it = landmarks.find(o.id);
-    if (it == landmarks.end() || o.cam_id >= rig.num_cameras || !seen.emplace(o.id, int(o.cam_id)).second) {
-      continue;
+    // Restore the existing repaired backend's same-timestamp position-consistency gate.
+    // Tracking and window factors share measurements: this is an engineering gate,
+    // not an independent-sensor chi-square claim. Reject the entire transaction,
+    // retaining the old window and the separately computed foreground estimate.
+    Eigen::MatrixXd tracking_info = tracked.info.cast<double>();
+    Eigen::LDLT<Eigen::MatrixXd> posterior(tracking_info);
+    if (posterior.info() != Eigen::Success || !posterior.isPositive() || posterior.vectorD().minCoeff() <= 0) {
+      TraceMessage("WINDOW_GATE t=%lld accept=0 reason=invalid_tracking_covariance", (long long)t);
+      return false;
     }
-    auto point = g.points.count(o.id) ? g.points[o.id] : it->second;
-    if ((rig.camera_from_rig[o.cam_id] * rig_from_world * point).z() <= .05) {
-      continue;
+    Eigen::MatrixXd select = Eigen::MatrixXd::Zero(15, 3);
+    select.block<3, 3>(3, 0).setIdentity();
+    Eigen::Matrix3d local_cov = posterior.solve(select).block<3, 3>(3, 0);
+    Eigen::Matrix3d rotation = tracked.w_from_imu.linear().cast<double>();
+    Eigen::Matrix3d covariance = rotation * local_cov * rotation.transpose();
+    Eigen::Vector3d delta =
+        (g.nodes.back().pose.w_from_imu.translation() - tracked.w_from_imu.translation()).cast<double>();
+    double score = 0;
+    bool accept = position_consistent(covariance, delta, score);
+    TraceMessage("WINDOW_GATE t=%lld accept=%d score=%.9g dp=%.9g", (long long)t, int(accept), score, delta.norm());
+    if (!accept) {
+      return false;
     }
-    g.points.emplace(o.id, point);
-    current.observations.push_back(o);
-  }
-  if (current.observations.size() < size_t(settings.min_observations)) {
-    return false;
-  }
-  g.nodes.push_back(current);
-  std::vector<TrackId> ids;
-  WinResult solved;
-  double after = 0;
-  for (int pass = 0; pass < 2; ++pass) {
+    // Re-express final normal equations in the newly anchored tangent coordinates.
     ids.clear();
-    auto p = pack(g, cal, rig, gravity, settings.max_iteration, settings.robustifier_scale, ids);
-    if (p.visuals.size() < size_t(settings.min_observations) ||
-        g.nodes.back().observations.size() < size_t(settings.min_observations)) {
+    auto final = pack(g, cal, rig, gravity, settings.max_iteration, settings.robustifier_scale, ids);
+    WinResult zero;
+    zero.points.resize(3 * ids.size());
+    auto linear = evaluate_window(final, zero);
+    if (!valid_evaluation(linear)) {
+      TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=posterior_jacobian", (long long)t);
       return false;
     }
-    if (const char* reason = invalid_problem(p)) {
-      TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=input reason=%s", (long long)t, reason);
-      return false;
-    }
-    const auto optimizer_start = Clock::now();
-    if (const char* directory = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_DIR")) {
-      // Capture immutable input before either optimizer or outlier pruning runs.
-      const char* low = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_MIN_NS");
-      const char* high = std::getenv("CUVSLAM_WINDOW_SNAPSHOT_MAX_NS");
-      if ((!low || t >= std::strtoll(low, nullptr, 10)) && (!high || t <= std::strtoll(high, nullptr, 10))) {
-        std::string path =
-            std::string(directory) + "/window_" + std::to_string(t) + "_" + std::to_string(pass) + ".bin";
-        gpu_window::fp64::SaveProblem(p, path.c_str());
+    const auto elimination_start = Clock::now();
+    auto reduced = full_joint_window() ? gpu_window::Reduced{} : assemble(final, linear, false);
+    TraceMessage("SCALE_POINT_QR t=%lld stage=posterior states=%d points=%zu ms=%.6f", (long long)t, final.count,
+                 ids.size(), elapsed(elimination_start));
+    int n = 15 * (g.nodes.size() - 1);
+    WMatrix final_rows;
+    WVector final_residual;
+    WMatrix info;
+    if (full_joint_window()) {
+      const auto full = joint_rows(final, zero, g, ids);
+      std::vector<int> current;
+      for (int k = n; k < n + 15; ++k) {
+        current.push_back(k);
       }
-    }
-    if (fp64_window()) {
-      solved = gpu_window::fp64::Optimize(p, fp64_gpu());
-    } else if (cpu_window()) {
-      solved = OptimizeCpu(p);
+      const auto posterior = cuvslam::pnp::joint_geometry::marginal(full.factor, current);
+      if (!posterior.observable) {
+        TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=joint_posterior_unobservable", (long long)t);
+        return false;
+      }
+      info = posterior.information;
     } else {
-      solved = schur_window() ? OptimizeSchur(p) : Optimize(p);
+      project_out(reduced.rows.leftCols(n), reduced.rows.middleCols(n, 15), reduced.residual, final_rows,
+                  final_residual);
+      info = final_rows.transpose() * final_rows;
     }
-    const double optimizer_ms = elapsed(optimizer_start);
-    TraceMessage("SCALE_SOLVE t=%lld pass=%d states=%d points=%zu obs=%zu ms=%.6f schur_ms=%.6f iterations=%d",
-                 (long long)t, pass, p.count, ids.size(), p.visuals.size(), optimizer_ms, solved.landmark_ms,
-                 solved.iterations);
-    if (!valid_result(solved, ids.size())) {
-      TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=result", (long long)t);
+    if (!info.allFinite() || info.cwiseAbs().maxCoeff() > std::numeric_limits<float>::max()) {
+      TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=posterior", (long long)t);
       return false;
     }
-    auto evaluation = evaluate_window(p, solved);
-    after = cost(evaluation, p.huber);
-    if (!std::isfinite(after) || after > solved.before + 1e-4 * std::max(1.f, solved.before)) {
-      TraceMessage("WINDOW_REJECT t=%lld reason=objective before=%.9g after=%.9g", (long long)t, solved.before, after);
+    g.nodes.back().pose.info = info.cast<float>();
+    const Pose accepted_result = g.nodes.back().pose;
+    if (!accepted_result.info.allFinite() || !accepted_result.velocity.allFinite() ||
+        !accepted_result.w_from_imu.matrix().allFinite()) {
       return false;
     }
-    for (size_t i = 0; i < g.nodes.size(); ++i) {
-      update_pose(g.nodes[i].pose, solved.x.data() + 15 * i);
+    const bool enforce_map = true;  // This safety variant never bypasses map acceptance.
+    std::map<TrackId, Vector3T> supported_points;
+    for (const auto id : ids) {
+      supported_points.emplace(id, g.points.at(id));
     }
-    for (size_t i = 0; i < ids.size(); ++i) {
-      for (int k = 0; k < 3; ++k) {
-        g.points[ids[i]][k] += solved.points[3 * i + k];
-      }
+    const bool map_safe = map_support_preserved(input, g, enforce_map ? supported_points : g.points, enforce_map);
+    auto publish_points = enforce_map ? std::move(supported_points) : g.points;
+    auto visible_points = publish_points;
+    for (const auto& point : input.landmarks) {
+      visible_points.emplace(point.first, point.second);
     }
-    for (const auto& node : g.nodes) {
-      if (!valid_state(pack_state(node.pose))) {
-        TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=updated_pose", (long long)t);
-        return false;
-      }
-    }
-    for (const auto& point : g.points) {
-      if (!point.second.allFinite()) {
-        TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=updated_point", (long long)t);
-        return false;
-      }
-    }
-    int removed = 0, behind = 0;
-    // Classify individual reprojections, rather than rejecting a whole window
-    // because one triangulated outlier crosses the camera plane. 9.21 is the
-    // 99% two-dimensional Gaussian residual threshold under the same visual info.
-    for (auto& node : g.nodes) {
-      auto& observations = node.observations;
-      observations.erase(std::remove_if(observations.begin(), observations.end(),
-                                        [&](const auto& o) {
-                                          auto it = g.points.find(o.id);
-                                          if (it == g.points.end()) {
-                                            ++removed;
-                                            return true;
-                                          }
-                                          const Vector3T pc = rig.camera_from_rig[o.cam_id] * cal.rig_from_imu() *
-                                                              node.pose.w_from_imu.inverse() * it->second;
-                                          if (!pc.allFinite() || pc.z() <= .05f) {
-                                            ++removed;
-                                            ++behind;
-                                            return true;
-                                          }
-                                          if (!pnp::PixelObservationSupported(rig, o, pc, .05f)) {
-                                            ++removed;
-                                            return true;
-                                          }
-                                          return false;
-                                        }),
-                         observations.end());
-    }
-    TraceMessage("WINDOW_PRUNE t=%lld pass=%d removed=%d behind=%d current_obs=%zu", (long long)t, pass, removed,
-                 behind, g.nodes.back().observations.size());
-    if (g.nodes.back().observations.size() < size_t(settings.min_observations)) {
+    if (input.accept_candidate && !input.accept_candidate(accepted_result, enforce_map ? visible_points : g.points)) {
       return false;
     }
-    if (!removed) {
-      break;
+    // A rejected map update also rejects its local solution and derived prior.
+    // Keeping only the local branch makes subsequent factors reference geometry
+    // different from the frontend's published map.
+    if (!map_safe) {
+      TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=map_support", (long long)t);
+      return false;
     }
-  }
-  // Restore the existing repaired backend's same-timestamp position-consistency gate.
-  // Tracking and window factors share measurements: this is an engineering gate,
-  // not an independent-sensor chi-square claim. Reject the entire transaction,
-  // retaining the old window and the separately computed foreground estimate.
-  Eigen::MatrixXd tracking_info = tracked.info.cast<double>();
-  Eigen::LDLT<Eigen::MatrixXd> posterior(tracking_info);
-  if (posterior.info() != Eigen::Success || !posterior.isPositive() || posterior.vectorD().minCoeff() <= 0) {
-    TraceMessage("WINDOW_GATE t=%lld accept=0 reason=invalid_tracking_covariance", (long long)t);
-    return false;
-  }
-  Eigen::MatrixXd select = Eigen::MatrixXd::Zero(15, 3);
-  select.block<3, 3>(3, 0).setIdentity();
-  Eigen::Matrix3d local_cov = posterior.solve(select).block<3, 3>(3, 0);
-  Eigen::Matrix3d rotation = tracked.w_from_imu.linear().cast<double>();
-  Eigen::Matrix3d covariance = rotation * local_cov * rotation.transpose();
-  Eigen::Vector3d delta =
-      (g.nodes.back().pose.w_from_imu.translation() - tracked.w_from_imu.translation()).cast<double>();
-  double score = 0;
-  bool accept = position_consistent(covariance, delta, score);
-  TraceMessage("WINDOW_GATE t=%lld accept=%d score=%.9g dp=%.9g", (long long)t, int(accept), score, delta.norm());
-  if (!accept) {
-    return false;
-  }
-  // Re-express final normal equations in the newly anchored tangent coordinates.
-  ids.clear();
-  auto final = pack(g, cal, rig, gravity, settings.max_iteration, settings.robustifier_scale, ids);
-  WinResult zero;
-  zero.points.resize(3 * ids.size());
-  auto linear = evaluate_window(final, zero);
-  if (!valid_evaluation(linear)) {
-    TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=posterior_jacobian", (long long)t);
-    return false;
-  }
-  const auto elimination_start = Clock::now();
-  auto reduced = assemble(final, linear, false);
-  TraceMessage("SCALE_POINT_QR t=%lld stage=posterior states=%d points=%zu ms=%.6f", (long long)t, final.count,
-               ids.size(), elapsed(elimination_start));
-  int n = 15 * (g.nodes.size() - 1);
-  WMatrix final_rows;
-  WVector final_residual;
-  project_out(reduced.rows.leftCols(n), reduced.rows.middleCols(n, 15), reduced.residual, final_rows, final_residual);
-  WMatrix info = final_rows.transpose() * final_rows;
-  if (!info.allFinite() || info.cwiseAbs().maxCoeff() > std::numeric_limits<float>::max()) {
-    TraceMessage("WINDOW_NUMERIC_REJECT t=%lld stage=posterior", (long long)t);
-    return false;
-  }
-  g.nodes.back().pose.info = info.cast<float>();
-  const Pose accepted_result = g.nodes.back().pose;
-  if (!accepted_result.info.allFinite() || !accepted_result.velocity.allFinite() ||
-      !accepted_result.w_from_imu.matrix().allFinite()) {
-    return false;
-  }
-  const bool enforce_map = true;  // This safety variant never bypasses map acceptance.
-  std::map<TrackId, Vector3T> supported_points;
-  for (const auto id : ids) {
-    supported_points.emplace(id, g.points.at(id));
-  }
-  const bool map_safe = map_support_preserved(input, g, enforce_map ? supported_points : g.points, enforce_map);
-  auto publish_points = enforce_map ? std::move(supported_points) : g.points;
-  auto visible_points = publish_points;
-  for (const auto& point : input.landmarks) {
-    visible_points.emplace(point.first, point.second);
-  }
-  if (input.accept_candidate && !input.accept_candidate(accepted_result, enforce_map ? visible_points : g.points)) {
-    return false;
-  }
-  // A rejected map update also rejects its local solution and derived prior.
-  // Keeping only the local branch makes subsequent factors reference geometry
-  // different from the frontend's published map.
-  if (!map_safe) {
-    TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=map_support", (long long)t);
-    return false;
-  }
-  const auto publish_nodes = g.nodes;
-  if (!prepare_retained(g, cal, rig, gravity, settings.max_iteration, settings.robustifier_scale, t)) {
-    return false;
-  }
-  // Capture the authoritative map version used by this solve. A commit may
-  // follow keyframe insertion, but must not overwrite an intervening correction.
-  d.pending_expected.clear();
-  for (const auto& k : map.get_recent_submap(20).consecutive_keyframes) {
-    const auto kt = k.keyframe->time_ns();
-    if (std::any_of(publish_nodes.begin(), publish_nodes.end(), [&](const Node& n) { return n.t == kt; })) {
-      d.pending_expected.emplace(kt, k.keyframe->get_state());
+    const auto publish_nodes = g.nodes;
+    if (!prepare_retained(g, cal, rig, gravity, settings.max_iteration, settings.robustifier_scale, t)) {
+      return false;
     }
+    // Capture the authoritative map version used by this solve. A commit may
+    // follow keyframe insertion, but must not overwrite an intervening correction.
+    d.pending_expected.clear();
+    for (const auto& k : map.get_recent_submap(20).consecutive_keyframes) {
+      const auto kt = k.keyframe->time_ns();
+      if (std::any_of(publish_nodes.begin(), publish_nodes.end(), [&](const Node& n) { return n.t == kt; })) {
+        d.pending_expected.emplace(kt, k.keyframe->get_state());
+      }
+    }
+    d.pending_map_write = true;
+    d.pending_publish_nodes = publish_nodes;
+    d.pending_points = std::move(publish_points);
+    d.pending = std::move(g);
+    d.have_pending = true;
+    // Only publish after map support, the caller guard and retained-prior work
+    // all succeed. Returning false never modifies the caller's pose/information.
+    result = accepted_result;
+    TraceMessage("WINDOW_SOLVE t=%lld states=%zu points=%zu obs=%zu iterations=%d before=%.9g after=%.9g", (long long)t,
+                 d.pending.nodes.size(), ids.size(), final.visuals.size(), solved.iterations, solved.before, after);
+    return true;
+  } catch (const std::exception& error) {
+    discard_pending();
+    TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=exception detail=%s", (long long)input.time_ns, error.what());
+    return false;
   }
-  d.pending_map_write = true;
-  d.pending_publish_nodes = publish_nodes;
-  d.pending_points = std::move(publish_points);
-  d.pending = std::move(g);
-  d.have_pending = true;
-  // Only publish after map support, the caller guard and retained-prior work
-  // all succeed. Returning false never modifies the caller's pose/information.
-  result = accepted_result;
-  TraceMessage("WINDOW_SOLVE t=%lld states=%zu points=%zu obs=%zu iterations=%d before=%.9g after=%.9g", (long long)t,
-               d.pending.nodes.size(), ids.size(), final.visuals.size(), solved.iterations, solved.before, after);
-  return true;
 }
 bool WindowBackend::commit(map::UnifiedMap& map, const imu::ImuCalibration& cal, int64_t t) {
   auto& d = *impl_;
@@ -806,6 +947,9 @@ bool WindowBackend::commit(map::UnifiedMap& map, const imu::ImuCalibration& cal,
   }
   for (const auto& n : d.pending_publish_nodes) {
     auto it = states.find(n.t);
+    if (it == states.end() && full_joint_window() && !n.map_frame) {
+      continue;
+    }
     if (it == states.end()) {
       TraceMessage("WINDOW_TRANSACTION_REJECT t=%lld reason=commit_missing_keyframe", (long long)t);
       discard_pending();
@@ -890,6 +1034,11 @@ bool WindowBackend::commit(map::UnifiedMap& map, const imu::ImuCalibration& cal,
   for (auto& n : g.nodes) {
     for (auto& o : n.observations) {
       used.insert(o.id);
+    }
+  }
+  if (full_joint_window()) {
+    for (auto id : g.joint_prior.ids) {
+      used.insert(TrackId(id));
     }
   }
   for (auto it = g.points.begin(); it != g.points.end();) {

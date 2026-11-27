@@ -3,9 +3,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <iomanip>
 #include "common/log.h"
 #include "pipelines/gpu_window/window_linear.h"
 #include "pnp/cauchy_parameters.h"
+#include "pnp/joint_geometry.h"
 
 namespace cuvslam::pnp {
 namespace geometry_profile_math {
@@ -299,6 +302,15 @@ bool GeometryProfile::refine(const map::UnifiedMap& map, const camera::Rig& rig,
                              const std::unordered_map<TrackId, Vector3T>& landmarks,
                              const std::vector<camera::Observation>& observations, size_t required, bool source_ray,
                              int64_t time_ns, Isometry3T& output, Matrix6T* information) {
+  if (std::getenv("VIO_GEOMETRY_JOINT")) {
+    return RefineJointGeometry(map, rig, landmarks, observations, required, time_ns, output, information);
+  }
+  const char* mode = std::getenv("VIO_GEOMETRY_USE_CENTERED");
+  const char* selected = std::getenv("VIO_GEOMETRY_CENTERED_FRAME_NS");
+  if (mode && (!selected || time_ns == std::strtoll(selected, nullptr, 10))) {
+    return refineWithPriorMean(map, rig, landmarks, observations, required, source_ray, time_ns, output, information,
+                               PriorMean::PreserveMap);
+  }
   if (std::getenv("VIO_GEOMETRY_MEAN_AUDIT")) {
     auto centered = output;
     Matrix6T centered_information = Matrix6T::Zero();
@@ -316,6 +328,27 @@ bool GeometryProfile::refine(const map::UnifiedMap& map, const camera::Rig& rig,
         "conditional_dxyz=%.12g,%.12g,%.12g centered_dxyz=%.12g,%.12g,%.12g",
         (long long)time_ns, int(accepted), int(centered_ok), conditional_delta.x(), conditional_delta.y(),
         conditional_delta.z(), centered_delta.x(), centered_delta.y(), centered_delta.z());
+    if (const char* directory = std::getenv("VIO_GEOMETRY_MEAN_SNAPSHOT_DIR")) {
+      std::ofstream file(std::string(directory) + "/mean_" + std::to_string(time_ns) + ".json");
+      file << std::setprecision(17) << "{\"time_ns\":" << time_ns << ",\"conditional_accept\":" << int(accepted)
+           << ",\"centered_accept\":" << int(centered_ok);
+      const auto write_pose = [&](const char* name, const Isometry3T& pose) {
+        file << ",\"" << name << "\":[";
+        for (int r = 0; r < 4; ++r) {
+          for (int c = 0; c < 4; ++c) {
+            if (r || c) {
+              file << ',';
+            }
+            file << pose.matrix()(r, c);
+          }
+        }
+        file << ']';
+      };
+      write_pose("input_rig_from_world", input);
+      write_pose("conditional_rig_from_world", output);
+      write_pose("centered_rig_from_world", centered);
+      file << '}';
+    }
     return accepted;
   }
   return refineWithPriorMean(map, rig, landmarks, observations, required, source_ray, time_ns, output, information,

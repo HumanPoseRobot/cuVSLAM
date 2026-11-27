@@ -1,0 +1,75 @@
+{
+  "time_ns": {
+    "min": 34678895508.0,
+    "median": 89380924807.0,
+    "p95": 138631662614.0,
+    "max": 144081891631.0
+  },
+  "dt": {
+    "min": 0.048851385712623596,
+    "median": 0.050001997500658035,
+    "p95": 0.05005975067615509,
+    "max": 0.05120592936873436
+  },
+  "gain_min_per_s": {
+    "min": 29.361352993695732,
+    "median": 30.07073814169375,
+    "p95": 30.12439915079039,
+    "max": 30.781230595506756
+  },
+  "gain_max_per_s": {
+    "min": 29.362058581421444,
+    "median": 30.07111709030646,
+    "p95": 30.124639673339086,
+    "max": 30.78140806003739
+  },
+  "vertical_gain_per_s": {
+    "min": 29.361439560067048,
+    "median": 30.07074498450457,
+    "p95": 30.124401314892864,
+    "max": 30.781237050666856
+  },
+  "Hvv_condition": {
+    "min": 1.0000043691648255,
+    "median": 1.0000246798059464,
+    "p95": 1.000038184481492,
+    "max": 1.0000671102897196
+  },
+  "velocity_conditional_error_mps": {
+    "min": 2.266790748115676e-16,
+    "median": 3.2629329219861313e-12,
+    "p95": 7.706397604527783e-10,
+    "max": 5.628294058832985e-06
+  },
+  "velocity_conditional_vertical_error_mps": {
+    "min": -3.253138506147389e-07,
+    "median": -1.6637102867251397e-15,
+    "p95": 3.8728711742899623e-11,
+    "max": 5.546959098424934e-07
+  },
+  "jacobian_relative_error": {
+    "min": 5.008387284474486e-18,
+    "median": 1.1048557479724306e-16,
+    "p95": 1.8558676591818498e-16,
+    "max": 2.6618882458964975e-16
+  },
+  "block_identity_error": {
+    "min": 7.660713854538165e-18,
+    "median": 9.826850924455659e-17,
+    "p95": 1.7209139177672373e-16,
+    "max": 2.8828857269024875e-16
+  },
+  "cost_improvement": {
+    "min": 2.6411740391146873e-25,
+    "median": 5.471117744387014e-17,
+    "p95": 3.0532687102055767e-12,
+    "max": 0.00016276482890918213
+  },
+  "math_gate": {
+    "passed": true,
+    "packets": 4378,
+    "jacobian_relative_error": 2.6618882458964975e-16,
+    "conditional_gain_identity_error": 2.8828857269024875e-16,
+    "scope": "actual optimized IMU blocks; analytic velocity and body-position Jacobians cross-checked with AD, conditional velocity gain solves exact linear block. Read-only diagnosis, no velocity clipping or threshold tuning"
+  }
+}

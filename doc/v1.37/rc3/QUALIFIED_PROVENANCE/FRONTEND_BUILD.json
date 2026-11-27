@@ -1,0 +1,17 @@
+{
+  "runtime": "/nas/shared/baidx/cuvslam_runs/stationarity_causal_20261126/affine_rank_build/runtime",
+  "base_core_sha256": "a7df7d18bcd4990bc6a798d0c9e13e3ad6bff1752ac0a4f420a1247882409703",
+  "core_sha256": "b6dff4de41aab7c2711c28ee264d769610e9e95e23570f78b2699f642b1c8895",
+  "source_manifest": {
+    "scope": "shared 6-column photometric model, GPU parameter order and whole-patch convergence; optional calibrated stereo branch uses SAME 20 maximum iterations; no acceptance/noise/calibration/time changes; zero discarded pivot coordinates in GPU rank-truncated solve, no rank threshold change",
+    "source_root": "/nas/shared/baidx/cuvslam_runs/posterior_accuracy_fix_20261125/src/libs",
+    "files": {
+      "affine_patch_consistency.h": "8d46bed81e9f6b67e1962fad8ea6fcda81243ce997c7b9609180dcd755cbefe5",
+      "st_tracker.cpp": "64957554ac08e27e95288c3db8e5a12c88c0afe789f2d5d61788f38dbc8dedaf",
+      "st_tracker.cu": "9c9cad099c221238e59227a006f0d7948ca9b8e10deea1c00ecc7c8695f46c8d",
+      "sof/internal/sof_multicamera_cpu.h": "f62e6e231425894759e73a8fb8b2ab61b24e5fe119895e5b67c9881d548f0e2d",
+      "sof/internal/sof_multicamera_gpu.h": "9aad6e07f774db104d4d9e74b2e2b1837fb184de351504f8ae924b1451661dce"
+    }
+  },
+  "scope": "optional calibrated stereo affine patch candidate: correct 6D update, mean Jacobian and whole-patch stop; 10+10 same20 iteration cap; not yet validated end-to-end; original principal/time/noise/gates"
+}

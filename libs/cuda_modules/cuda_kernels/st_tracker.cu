@@ -1,3 +1,4 @@
+#include "affine_patch_consistency.h"
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
  *
@@ -205,6 +206,9 @@ __device__ __forceinline__ bool ColPivHouseholderQRSolve(const float* A, const f
       x_transposed[i] += Q_T[i * Dim + j] * b[j];
     }
   }
+
+  // Rank-truncated QR must not turn unobservable Q^T b components into motion.
+  for (size_t i = nonzero_pivots; i < Dim; ++i) x_transposed[i] = 0.f;
 
   // solve triangular equation
   for (int i = nonzero_pivots - 1; i >= 0; i--) {
@@ -537,7 +541,7 @@ __global__ void st_track_kernel(Pyramid currentGradXPyramid, Pyramid currentGrad
           }
         }
 
-        {
+        if (!full_mapping) {
           const float determinant = w__gxgx * w__gygy - w__gxgy * w__gxgy;
 
           const float2 v = {(w__gygy * wr_gx - w__gxgy * wr_gy) / determinant,
@@ -545,9 +549,10 @@ __global__ void st_track_kernel(Pyramid currentGradXPyramid, Pyramid currentGrad
 
           const float v_norm = sqrt(v.x * v.x + v.y * v.y);
 
-          isConverged = (v_norm < ST_CONVERGENCE_THRESHOLD);
+          isConverged = !full_mapping && (v_norm < ST_CONVERGENCE_THRESHOLD);
 
           if (isConverged) {
+            if (n_full_mapping_iterations > 0) { i = n_shift_only_iterations - 1; isConverged = false; continue; }
             // TODO: investigate info matrix calculation,
             // now it's not correct and requires to use default info matrix
             // info_mat[0] = w__gxgx;
@@ -559,105 +564,14 @@ __global__ void st_track_kernel(Pyramid currentGradXPyramid, Pyramid currentGrad
         }
 
         if (full_mapping) {
-          float wx_gxgx = 0.f;
-          float wx_gxgy = 0.f;
-          float wx_gygy = 0.f;
-
-          float wy_gxgx = 0.f;
-          float wy_gxgy = 0.f;
-          float wy_gygy = 0.f;
-
-          float wxxgxgx = 0.f;
-          float wxxgxgy = 0.f;
-          float wxxgygy = 0.f;
-
-          float wxygxgx = 0.f;
-          float wxygxgy = 0.f;
-          float wxygygy = 0.f;
-
-          float wyygxgx = 0.f;
-          float wyygxgy = 0.f;
-          float wyygygy = 0.f;
-
-          float wrxgx = 0.f;
-          float wrxgy = 0.f;
-          float wrygx = 0.f;
-          float wrygy = 0.f;
-
-#pragma unroll
-          for (int iy = 0; iy < PATCH_DIM; iy++) {
-#pragma unroll
-            for (int ix = 0; ix < PATCH_DIM; ix++) {
-              int patch_idx = iy * PATCH_DIM + ix;
-
-              float weight = gauss_coeffs[patch_idx];
-              float gx_value = gx[patch_idx];
-              float gy_value = gy[patch_idx];
-
-              float gxx = gx_value * gx_value;
-              float gxy = gx_value * gy_value;
-              float gyy = gy_value * gy_value;
-
-              float wx = x_patch[patch_idx] * weight;
-              float wy = y_patch[patch_idx] * weight;
-              float wxx = xx_patch[patch_idx] * weight;
-              float wxy = xy_patch[patch_idx] * weight;
-              float wyy = yy_patch[patch_idx] * weight;
-              float r = residual[patch_idx];
-
-              wx_gxgx += wx * gxx;
-              wx_gxgy += wx * gxy;
-              wx_gygy += wx * gyy;
-
-              wy_gxgx += wy * gxx;
-              wy_gxgy += wy * gxy;
-              wy_gygy += wy * gyy;
-
-              wxxgxgx += wxx * gxx;
-              wxxgxgy += wxx * gxy;
-              wxxgygy += wxx * gyy;
-
-              wxygxgx += wxy * gxx;
-              wxygxgy += wxy * gxy;
-              wxygygy += wxy * gyy;
-
-              wyygxgx += wyy * gxx;
-              wyygxgy += wyy * gxy;
-              wyygygy += wyy * gyy;
-
-              wrxgx += r * wx * gx_value;
-              wrxgy += r * wx * gy_value;
-              wrygx += r * wy * gx_value;
-              wrygy += r * wy * gy_value;
-            }
-          }
-
-          float t[FULL_MAP_ORDER * FULL_MAP_ORDER] = {
-              wxxgxgx, wxxgxgy, wxygxgx, wxygxgy, wx_gxgx, wx_gxgy, wxxgxgy, wxxgygy, wxygxgy,
-              wxygygy, wx_gxgy, wx_gygy, wxygxgx, wxygxgy, wyygxgx, wyygxgy, wy_gxgx, wy_gxgy,
-              wxygxgy, wxygygy, wyygxgy, wyygygy, wy_gxgy, wy_gygy, wx_gxgx, wx_gxgy, wy_gxgx,
-              wy_gxgy, w__gxgx, w__gxgy, wx_gxgy, wx_gygy, wy_gxgy, wy_gygy, w__gxgy, w__gygy};
-
-          float a[FULL_MAP_ORDER] = {wrxgx, wrxgy, wrygx, wrygy, wr_gx, wr_gy};
-
-          float z[FULL_MAP_ORDER];
-
-          if (!ColPivHouseholderQRSolve<FULL_MAP_ORDER>(t, a, z)) {
-            refine_mapping_status = false;
-            break;
-          }
-
-          const float& dxx = z[0];
-          const float& dyx = z[1];
-          const float& dxy = z[2];
-          const float& dyy = z[3];
-          const float& dx = z[4];
-          const float& dy = z[5];
-
-          map_ = {map_.x + dxx, map_.y + dyx, map_.z + dxy, map_.w + dyy};
-
-          xy_.x += dx;
-          xy_.y += dy;
+          float t[FULL_MAP_ORDER * FULL_MAP_ORDER], a[FULL_MAP_ORDER], z[FULL_MAP_ORDER];
+          affine_patch::CenteredNormal9(gx, gy, gx_sum / PATCH_SIZE, gy_sum / PATCH_SIZE,
+                                        residual, gauss_coeffs, t, a);
+          if (!ColPivHouseholderQRSolve<FULL_MAP_ORDER>(t, a, z) || !affine_patch::Finite6(z)) { refine_mapping_status = false; break; }
+          map_ = {map_.x + z[0], map_.y + z[2], map_.z + z[1], map_.w + z[3]};
+          xy_.x += z[4]; xy_.y += z[5];
+          isConverged = affine_patch::MaxWarpSquared9(z) < ST_CONVERGENCE_THRESHOLD * ST_CONVERGENCE_THRESHOLD;
+          if (isConverged) break;
         } else {
           float t[PARTIAL_MAP_ORDER * PARTIAL_MAP_ORDER] = {w__gxgx, w__gxgy, w__gxgy, w__gygy};
 
@@ -1018,7 +932,7 @@ __global__ void st_track_with_cache_kernel(Pyramid currentGradXPyramid, Pyramid 
           }
         }
 
-        {
+        if (!full_mapping) {
           const float determinant = w__gxgx * w__gygy - w__gxgy * w__gxgy;
 
           const float2 v = {(w__gygy * wr_gx - w__gxgy * wr_gy) / determinant,
@@ -1026,9 +940,10 @@ __global__ void st_track_with_cache_kernel(Pyramid currentGradXPyramid, Pyramid 
 
           const float v_norm = sqrt(v.x * v.x + v.y * v.y);
 
-          isConverged = (v_norm < ST_CONVERGENCE_THRESHOLD);
+          isConverged = !full_mapping && (v_norm < ST_CONVERGENCE_THRESHOLD);
 
           if (isConverged) {
+            if (n_full_mapping_iterations > 0) { i = n_shift_only_iterations - 1; isConverged = false; continue; }
             // TODO: investigate info matrix calculation,
             // now it's not correct and requires to use default info matrix
             // info_mat[0] = w__gxgx;
@@ -1040,105 +955,14 @@ __global__ void st_track_with_cache_kernel(Pyramid currentGradXPyramid, Pyramid 
         }
 
         if (full_mapping) {
-          float wx_gxgx = 0.f;
-          float wx_gxgy = 0.f;
-          float wx_gygy = 0.f;
-
-          float wy_gxgx = 0.f;
-          float wy_gxgy = 0.f;
-          float wy_gygy = 0.f;
-
-          float wxxgxgx = 0.f;
-          float wxxgxgy = 0.f;
-          float wxxgygy = 0.f;
-
-          float wxygxgx = 0.f;
-          float wxygxgy = 0.f;
-          float wxygygy = 0.f;
-
-          float wyygxgx = 0.f;
-          float wyygxgy = 0.f;
-          float wyygygy = 0.f;
-
-          float wrxgx = 0.f;
-          float wrxgy = 0.f;
-          float wrygx = 0.f;
-          float wrygy = 0.f;
-
-#pragma unroll
-          for (int iy = 0; iy < PATCH_DIM; iy++) {
-#pragma unroll
-            for (int ix = 0; ix < PATCH_DIM; ix++) {
-              int patch_idx = iy * PATCH_DIM + ix;
-
-              float weight = gauss_coeffs[patch_idx];
-              float gx_value = gx[patch_idx];
-              float gy_value = gy[patch_idx];
-
-              float gxx = gx_value * gx_value;
-              float gxy = gx_value * gy_value;
-              float gyy = gy_value * gy_value;
-
-              float wx = x_patch[patch_idx] * weight;
-              float wy = y_patch[patch_idx] * weight;
-              float wxx = xx_patch[patch_idx] * weight;
-              float wxy = xy_patch[patch_idx] * weight;
-              float wyy = yy_patch[patch_idx] * weight;
-              float r = residual[patch_idx];
-
-              wx_gxgx += wx * gxx;
-              wx_gxgy += wx * gxy;
-              wx_gygy += wx * gyy;
-
-              wy_gxgx += wy * gxx;
-              wy_gxgy += wy * gxy;
-              wy_gygy += wy * gyy;
-
-              wxxgxgx += wxx * gxx;
-              wxxgxgy += wxx * gxy;
-              wxxgygy += wxx * gyy;
-
-              wxygxgx += wxy * gxx;
-              wxygxgy += wxy * gxy;
-              wxygygy += wxy * gyy;
-
-              wyygxgx += wyy * gxx;
-              wyygxgy += wyy * gxy;
-              wyygygy += wyy * gyy;
-
-              wrxgx += r * wx * gx_value;
-              wrxgy += r * wx * gy_value;
-              wrygx += r * wy * gx_value;
-              wrygy += r * wy * gy_value;
-            }
-          }
-
-          float t[FULL_MAP_ORDER * FULL_MAP_ORDER] = {
-              wxxgxgx, wxxgxgy, wxygxgx, wxygxgy, wx_gxgx, wx_gxgy, wxxgxgy, wxxgygy, wxygxgy,
-              wxygygy, wx_gxgy, wx_gygy, wxygxgx, wxygxgy, wyygxgx, wyygxgy, wy_gxgx, wy_gxgy,
-              wxygxgy, wxygygy, wyygxgy, wyygygy, wy_gxgy, wy_gygy, wx_gxgx, wx_gxgy, wy_gxgx,
-              wy_gxgy, w__gxgx, w__gxgy, wx_gxgy, wx_gygy, wy_gxgy, wy_gygy, w__gxgy, w__gygy};
-
-          float a[FULL_MAP_ORDER] = {wrxgx, wrxgy, wrygx, wrygy, wr_gx, wr_gy};
-
-          float z[FULL_MAP_ORDER];
-
-          if (!ColPivHouseholderQRSolve<FULL_MAP_ORDER>(t, a, z)) {
-            refine_mapping_status = false;
-            break;
-          }
-
-          const float& dxx = z[0];
-          const float& dyx = z[1];
-          const float& dxy = z[2];
-          const float& dyy = z[3];
-          const float& dx = z[4];
-          const float& dy = z[5];
-
-          map_ = {map_.x + dxx, map_.y + dyx, map_.z + dxy, map_.w + dyy};
-
-          xy_.x += dx;
-          xy_.y += dy;
+          float t[FULL_MAP_ORDER * FULL_MAP_ORDER], a[FULL_MAP_ORDER], z[FULL_MAP_ORDER];
+          affine_patch::CenteredNormal9(gx, gy, gx_sum / PATCH_SIZE, gy_sum / PATCH_SIZE,
+                                        residual, gauss_coeffs, t, a);
+          if (!ColPivHouseholderQRSolve<FULL_MAP_ORDER>(t, a, z) || !affine_patch::Finite6(z)) { refine_mapping_status = false; break; }
+          map_ = {map_.x + z[0], map_.y + z[2], map_.z + z[1], map_.w + z[3]};
+          xy_.x += z[4]; xy_.y += z[5];
+          isConverged = affine_patch::MaxWarpSquared9(z) < ST_CONVERGENCE_THRESHOLD * ST_CONVERGENCE_THRESHOLD;
+          if (isConverged) break;
         } else {
           float t[PARTIAL_MAP_ORDER * PARTIAL_MAP_ORDER] = {w__gxgx, w__gxgy, w__gxgy, w__gygy};
 

@@ -1,5 +1,7 @@
 #include <fstream>
 #include <iomanip>
+#include "pipelines/gpu_window/joint_initial_graph.h"
+#include "pipelines/gpu_window/joint_online.h"
 #include "pipelines/init_visual_admission.h"
 #include "pnp/visual_information.h"
 #include "visual_snapshot.h"
@@ -541,6 +543,12 @@ ImuFusionContext::ImuFusionContext(map::UnifiedMap& map, const camera::Rig& rig,
   if (const char* mode = std::getenv("CUVSLAM_JOINT_BACKEND"); mode && std::string_view(mode) == "window") {
     window_ = std::make_shared<sba_imu::WindowBackend>();
   }
+  if (std::getenv("VIO_POSTERIOR_TRANSFER")) {
+    if (rig.num_cameras < 2 || std::getenv("VIO_WINDOW_JOINT_GEOMETRY")) {
+      throw std::invalid_argument("joint posterior requires multi-camera and exclusive window ownership");
+    }
+    posterior_ = std::make_shared<gpu_window::posterior::Online>();
+  }
   const char* option = std::getenv("CUVSLAM_JOINT_VI");
   joint_enabled_ = imu_runtime::JointEnabled(rig.num_cameras, option);
   TraceMessage("VIO_OPTIONS cameras=%d joint=%d", rig.num_cameras, static_cast<int>(joint_enabled_));
@@ -551,7 +559,13 @@ void ImuFusionContext::register_gravity_callback() {
   sm_.set_gravity_init_fn([this](size_t num_kfs) { return gravity_estimation_callback(num_kfs); });
 }
 
+bool ImuFusionContext::window_active() const {
+  return (posterior_ && posterior_->ready()) || (window_ && joint_active_ && has_joint_prior_);
+}
+
 void ImuFusionContext::reset() {
+  posterior_frame_.reset();
+  if (posterior_) { posterior_->reset(); }
   geometry_profile_.reset();
   bootstrap_recovered_ = false;
   init_visual_witness_.reset();
@@ -649,6 +663,72 @@ bool ImuFusionContext::solve_inertial(const std::unordered_map<TrackId, Vector3T
   TRACE_EVENT ev = profiler_domain_.trace_event("solve_inertial");
   joint_active_ = joint_enabled_ && planes.empty() && depth_points.empty() &&
                   std::none_of(depth_infos.begin(), depth_infos.end(), [](auto p) { return p != nullptr; });
+
+  if (posterior_ && posterior_->ready()) {
+    sba_imu::Pose prediction, candidate;
+    bool prediction_valid = false;
+    const bool accepted = interval_healthy && posterior_->solve(map_, rig_, calib_, imu_storage_, landmarks,
+        observations, settings, time_ns, is_keyframe, candidate, prediction, prediction_valid);
+    if (accepted) {
+      curr_pose_ = candidate;
+      has_joint_prior_ = true;
+      guard_rejected_s_ = 0;
+      return true;
+    }
+    posterior_->discard();
+    if (prediction_valid) { curr_pose_ = prediction; }
+    const bool budget = prediction_valid && frontend_guard::prediction_budget(
+        guard_rejected_s_, last_frame_preint_.dT_s, false);
+    has_joint_prior_ = prediction_valid;
+    guard_internal_prediction_ = prediction_valid;
+    guard_prediction_only_ = budget;
+    guard_exhausted_ = !budget;
+    return false;
+  }
+  if (joint_active_ && window_ && std::getenv("VIO_WINDOW_JOINT_GEOMETRY")) {
+    sba_imu::Pose prediction;
+    bool prediction_valid = false, conservative = false;
+    const bool initial_ok = interval_healthy && solve_joint(calib_, rig_, landmarks, observations, *maybe_gravity,
+                                                            settings, prev_pose_, has_joint_prior_, curr_pose_, time_ns,
+                                                            true, prediction, prediction_valid, conservative);
+    if (!interval_healthy || !prediction_valid) {
+      has_joint_prior_ = false;
+      window_->discard_pending();
+      return false;
+    }
+    if (!initial_ok) {
+      curr_pose_ = prediction;
+    }
+    const auto initial = curr_pose_;
+    auto candidate = initial;
+    auto validator = [&](const sba_imu::Pose& value, const std::map<TrackId, Vector3T>& points) {
+      return frontend_guard::validate(calib_, rig_, points, observations, prediction, value, settings.min_observations,
+                                      last_frame_preint_.dT_s, time_ns, "joint_geometry", false, true);
+    };
+    const bool accepted =
+        window_->solve({map_, calib_, rig_, imu_storage_, landmarks, observations, *maybe_gravity, settings, prev_pose_,
+                        initial, prev_pose_ts_ns_, time_ns, validator, is_keyframe},
+                       candidate);
+    TraceMessage("JOINT_GEOMETRY_FRAME t=%lld accept=%d keyframe=%d initial_valid=%d", (long long)time_ns,
+                 int(accepted), int(is_keyframe), int(initial_ok));
+    if (accepted) {
+      curr_pose_ = candidate;
+      has_joint_prior_ = true;
+      guard_rejected_s_ = 0;
+      guard_prediction_only_ = false;
+      guard_exhausted_ = false;
+      return true;
+    }
+    // Rejection cannot publish the foreground fixed-map posterior in this mode.
+    curr_pose_ = prediction;
+    has_joint_prior_ = true;
+    guard_internal_prediction_ = true;
+    guard_prediction_only_ = false;
+    guard_exhausted_ = true;
+    window_->discard_pending();
+    return false;
+  }
+
   if (joint_active_) {
     // Stereo uses the same publication guard as larger rigs. Otherwise a rejected
     // inertial candidate can escape validation and seed the next prediction.
@@ -818,11 +898,15 @@ bool ImuFusionContext::solve_visual(const std::unordered_map<TrackId, Vector3T>&
       bootstrap_recovered_ = true;
     }
   }
-  if (ok && !map_.get_gravity() && std::getenv("VIO_GEOMETRY_UNCERTAINTY")) {
-    geometry_profile_.refine(map_, rig_, landmarks, pose_estimator_.last_visual_observations(),
-                             pnp::MultisensorSolverSettings{}.min_observations,
-                             std::getenv("VIO_SOURCE_RAY") != nullptr, time_ns, rig_from_world,
-                             std::getenv("VIO_VISUAL_INFORMATION") ? &info : nullptr);
+  if (ok && !posterior_ && !map_.get_gravity() && std::getenv("VIO_GEOMETRY_UNCERTAINTY")) {
+    const bool geometry_ok = geometry_profile_.refine(map_, rig_, landmarks, pose_estimator_.last_visual_observations(),
+                                                      pnp::MultisensorSolverSettings{}.min_observations,
+                                                      std::getenv("VIO_SOURCE_RAY") != nullptr, time_ns, rig_from_world,
+                                                      std::getenv("VIO_VISUAL_INFORMATION") ? &info : nullptr);
+    if (std::getenv("VIO_GEOMETRY_JOINT") && !geometry_ok && !map_.empty()) {
+      TraceMessage("JOINT_GEOMETRY_REJECT t=%lld fixed_map_fallback=0", (long long)time_ns);
+      return false;
+    }
   }
   visual_audit::save(time_ns, rig_, landmarks, observations, visual_initial, rig_from_world, ok);
   if (pose_estimator_.last_visual_trial()) {
@@ -834,7 +918,13 @@ bool ImuFusionContext::solve_visual(const std::unordered_map<TrackId, Vector3T>&
   }
 
   curr_pose_.w_from_imu = rig_from_world.inverse() * imu_from_rig.inverse();
-  if (!map_.get_gravity() && bootstrap_recovered_ && std::getenv("VIO_INIT_VISUAL_CHECK")) {
+  if (posterior_) {
+    if (posterior_->ready() && !map_.get_gravity()) { posterior_->reset(); }
+    posterior_frame_ = std::make_shared<gpu_window::posterior::CurrentFrame>(
+        gpu_window::posterior::CurrentFrame{time_ns, curr_pose_, landmarks, observations});
+  }
+  if (!map_.get_gravity() && ((bootstrap_recovered_ && std::getenv("VIO_INIT_VISUAL_CHECK")) ||
+                              std::getenv("VIO_POSTERIOR_CAPTURE_DIR") || std::getenv("VIO_POSTERIOR_TRANSFER"))) {
     InitVisualWitness witness;
     witness.time_ns = time_ns;
     witness.world_from_rig = rig_from_world.inverse();
@@ -889,6 +979,40 @@ ImuFusionContext::FrameResult ImuFusionContext::finalize_frame(bool pnp_result, 
                                                                sof::FrameState fs,
                                                                const StateMachineSettings& sm_settings,
                                                                bool metric_bootstrap) {
+  // The legacy backend only solves keyframes and commits after their map
+  // insertion. The full correlated lag also solves ordinary frames. Commit
+  // those transactions before promoting their posterior to the next anchor.
+  // Keyframes keep the existing insertion-then-commit path.
+  if (window_ && std::getenv("VIO_WINDOW_JOINT_GEOMETRY") && fs != sof::FrameState::Key) {
+    if (pnp_result && no_drops) {
+      if (!window_->commit(map_, calib_, time_ns)) {
+        window_->discard_pending();
+        pnp_result = false;
+        guard_exhausted_ = true;
+        guard_prediction_only_ = false;
+        const auto gravity = map_.get_gravity();
+        guard_internal_prediction_ = gravity.has_value();
+        if (gravity) {
+          prev_pose_.predict_pose(*gravity, last_frame_preint_, curr_pose_);
+        }
+        TraceMessage("FRONTEND_COMMIT_FAILED t=%lld reason=ordinary_frame publish=0", (long long)time_ns);
+      }
+    } else {
+      window_->discard_pending();
+    }
+  }
+  if (posterior_ && posterior_->ready() && fs != sof::FrameState::Key) {
+    if (pnp_result && no_drops) {
+      if (!posterior_->commit(map_, calib_, time_ns)) {
+        posterior_->prediction_at(time_ns, curr_pose_);
+        pnp_result = false;
+        guard_exhausted_ = true;
+        guard_prediction_only_ = false;
+      } else {
+        posterior_->pose_at(time_ns, curr_pose_);
+      }
+    } else { posterior_->discard(); }
+  }
   metric_bootstrap_ = metric_bootstrap;
   prev_pose_ts_ns_ = time_ns;
 
@@ -997,6 +1121,15 @@ map::State ImuFusionContext::build_keyframe_state(const Isometry3T& rig_from_wor
 }
 
 bool ImuFusionContext::on_keyframe_committed(bool lost) {
+  if (posterior_ && posterior_->ready() && !lost) {
+    if (!posterior_->commit(map_, calib_, prev_pose_ts_ns_)) { return false; }
+    posterior_->pose_at(prev_pose_ts_ns_, prev_pose_);
+    if (last_valid_ts_ns_ == prev_pose_ts_ns_) { last_valid_pose_ = prev_pose_; }
+    last_kf_ts_ns_ = prev_pose_ts_ns_;
+    integ_kf_ = prev_pose_;
+    last_kf_preint_ = sba_imu::IMUPreintegration(prev_pose_.gyro_bias, prev_pose_.acc_bias);
+    return true;
+  }
   if (window_ && !lost && has_joint_prior_ && !window_->commit(map_, calib_, prev_pose_ts_ns_)) {
     // Fail closed: a pose whose map transaction failed is not a valid output.
     window_->reset();
@@ -1061,6 +1194,7 @@ void ImuFusionContext::commit_recovery_anchor(int64_t current_time_ns) {
 }
 
 std::optional<Matrix3T> ImuFusionContext::joint_position_covariance() const {
+  if (posterior_ && posterior_->ready()) { return posterior_->position_covariance(prev_pose_ts_ns_); }
   if (!joint_active_ || !has_joint_prior_) {
     return std::nullopt;
   }
@@ -1081,6 +1215,13 @@ std::optional<Matrix3T> ImuFusionContext::joint_position_covariance() const {
 }
 
 bool ImuFusionContext::read_committed_state(int64_t time_ns, Isometry3T& world_from_rig, Matrix6T& info) {
+  if (posterior_ && posterior_->ready()) {
+    if (!posterior_->pose_at(time_ns, prev_pose_)) { return false; }
+    if (last_valid_ts_ns_ == time_ns) { last_valid_pose_ = prev_pose_; }
+    world_from_rig = prev_pose_.w_from_imu * calib_.rig_from_imu().inverse();
+    info = prev_pose_.info.topLeftCorner<6, 6>();
+    return true;
+  }
   if (window_active()) {
     return false;
   }
@@ -1135,6 +1276,10 @@ std::optional<Vector3T> ImuFusionContext::get_gravity() const {
 }
 
 bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
+  if (posterior_ && posterior_->ready()) {
+    if (map_.get_gravity()) { return true; }
+    posterior_->reset();
+  }
   TRACE_EVENT ev = profiler_domain_.trace_event("gravity_estimation_callback");
   auto recent_map = map_.get_recent_submap(map_.capacity());
   TraceMessage("VIO_INIT_ATTEMPT kfs=%zu required=%zu metric=%d", recent_map.consecutive_keyframes.size(), num_kfs,
@@ -1202,7 +1347,7 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
     TraceMessage("VIO_INIT_REJECT stage=candidate_finite_rotation");
     return false;
   }
-  const Vector3T gravity_for_sba = Rgravity * optimizer_.get_default_gravity();
+  Vector3T gravity_for_sba = Rgravity * optimizer_.get_default_gravity();
   if (!map_.get_gravity() && bootstrap_recovered_ && std::getenv("VIO_INIT_VISUAL_CHECK")) {
     if (!init_visual_witness_ || init_visual_witness_->time_ns != prev_pose_ts_ns_) {
       TraceMessage("VIO_INIT_REJECT stage=missing_current_witness");
@@ -1235,9 +1380,57 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
       return false;
     }
   }
+  if (const char* directory = std::getenv("VIO_POSTERIOR_CAPTURE_DIR")) {
+    try {
+      if (!init_visual_witness_ || init_visual_witness_->time_ns != prev_pose_ts_ns_) {
+        throw std::runtime_error("missing current initialization observations");
+      }
+      const auto& witness = *init_visual_witness_;
+      gpu_window::posterior::CurrentFrame current{prev_pose_ts_ns_, curr_pose_, witness.points, witness.observations};
+      const auto graph = gpu_window::posterior::BuildInitializationGraph(
+          recent_map, gravity_cache, current, rig_, calib_, imu_storage_, gravity_for_sba.cast<double>());
+      gpu_window::posterior::SaveGraph(
+          graph, std::string(directory) + "/initial_" + std::to_string(prev_pose_ts_ns_) + ".bin");
+      TraceMessage("JOINT_INITIAL_CAPTURE t=%lld states=%zu points=%zu visual=%zu", (long long)prev_pose_ts_ns_,
+                   graph.nodes.size(), graph.points.size(), graph.visuals.size());
+    } catch (const std::exception& error) {
+      TraceMessage("JOINT_INITIAL_CAPTURE_FAIL t=%lld detail=%s", (long long)prev_pose_ts_ns_, error.what());
+    }
+  }
+  std::optional<gpu_window::posterior::Initialization> joint_initialization;
+  std::map<int64_t, Vector3T> joint_points;
+  if (posterior_) {
+    try {
+      if (!posterior_frame_ || posterior_frame_->time_ns != prev_pose_ts_ns_) { return false; }
+      auto graph = gpu_window::posterior::BuildInitializationGraph(recent_map, gravity_cache,
+          *posterior_frame_, rig_, calib_, imu_storage_, gravity_for_sba.cast<double>());
+      joint_initialization.emplace();
+      if (!posterior_->initialize(std::move(graph), *posterior_frame_, rig_, calib_, *joint_initialization)) {
+        TraceMessage("JOINT_POSTERIOR_INIT_REJECT t=%lld", (long long)prev_pose_ts_ns_);
+        return false;
+      }
+      const auto& complete = joint_initialization->complete;
+      for (size_t i = 0; i < gravity_cache.size(); ++i) {
+        auto pose = gpu_window::posterior::StatePose(complete.nodes[i]);
+        pose.preintegration = gravity_cache[i].preintegration;
+        pose.preintegration.SetNewBias(pose.gyro_bias, pose.acc_bias);
+        pose.preintegration.Reintegrate(calib_);
+        if (!pose.preintegration.dR.allFinite() || !pose.preintegration.dV.allFinite() ||
+            !pose.preintegration.dP.allFinite()) { return false; }
+        gravity_cache[i] = std::move(pose);
+      }
+      for (size_t i = 0; i < complete.ids.size(); ++i) {
+        joint_points.emplace(complete.ids[i], complete.points[i].cast<float>());
+      }
+      gravity_for_sba = complete.gravity.cast<float>();
+    } catch (const std::exception& error) {
+      TraceMessage("JOINT_POSTERIOR_INIT_ERROR detail=%s", error.what());
+      return false;
+    }
+  }
   TRACE_EVENT ev1 = profiler_domain_.trace_event("update map");
 
-  if (enable_imu_sba_init_ && !metric_bootstrap_) {
+  if (!posterior_ && enable_imu_sba_init_ && !metric_bootstrap_) {
     run_imu_sba_init(recent_map, gravity_for_sba, gravity_cache, observations_per_kf);
   }
 
@@ -1250,12 +1443,23 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
     kf.keyframe->set_velocity(pose.velocity);
     kf.keyframe->set_pose((pose.w_from_imu * rig_from_imu.inverse()).inverse());
     if (kf.preintegration) {
-      kf.preintegration->SetNewBias(pose.gyro_bias, pose.acc_bias);
-      kf.preintegration->Reintegrate(calib_);
+      if (posterior_) { *kf.preintegration = pose.preintegration; }
+      else {
+        kf.preintegration->SetNewBias(pose.gyro_bias, pose.acc_bias);
+        kf.preintegration->Reintegrate(calib_);
+      }
     }
     id++;
   }
 
+  if (posterior_) {
+    for (const auto& frame : recent_map.landmark_and_obs) {
+      for (const auto& entry : frame) {
+        const auto point = joint_points.find(static_cast<int64_t>(entry.landmark->id()));
+        if (point != joint_points.end()) { entry.landmark->set_pose(point->second); }
+      }
+    }
+  }
   // Bias estimates share sensor coordinates, but velocities belong to distinct
   // times. Never copy the last keyframe velocity into every live frame.
   const auto& anchor = gravity_cache.back();
@@ -1274,7 +1478,7 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
     }
     pose.preintegration.SetNewBias(anchor.gyro_bias, anchor.acc_bias);
     pose.preintegration.Reintegrate(calib_);
-    seed_joint_prior(pose);
+    if (!posterior_) { seed_joint_prior(pose); }
   };
   synchronize(curr_pose_, prev_pose_ts_ns_);
   synchronize(prev_pose_, prepared_previous_ts_ns_);
@@ -1288,6 +1492,13 @@ bool ImuFusionContext::gravity_estimation_callback(size_t num_kfs) {
   TraceMessage("VIO_INIT_STATE_SYNC current=%lld previous=%lld anchor=%lld", (long long)prev_pose_ts_ns_,
                (long long)prepared_previous_ts_ns_, (long long)anchor_ns);
 
+  if (joint_initialization) {
+    curr_pose_ = gpu_window::posterior::StatePose(joint_initialization->complete.nodes.back());
+    last_kf_preint_.SetNewBias(anchor.gyro_bias, anchor.acc_bias);
+    last_kf_preint_.Reintegrate(calib_);
+    posterior_->adopt(std::move(*joint_initialization), *posterior_frame_);
+    has_joint_prior_ = true;
+  }
   TraceMessage("VIO_INIT_SUCCESS gravity_norm=%.7f metric=%d", gravity_for_sba.norm(),
                static_cast<int>(metric_bootstrap_));
   map_.set_gravity(gravity_for_sba);

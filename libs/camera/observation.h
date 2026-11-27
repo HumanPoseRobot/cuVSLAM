@@ -28,6 +28,9 @@
 
 namespace cuvslam::camera {
 
+// Nominal conservative pixel uncertainty encoded in default observation info.
+inline constexpr double kDefaultObservationNoisePx = 3.;
+
 struct Observation {
   Observation() = default;
   Observation(CameraId cam_id_, TrackId id_, const Vector2T& xy_, const Matrix2T& xy_info_)

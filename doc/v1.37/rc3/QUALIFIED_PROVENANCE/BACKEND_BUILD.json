@@ -1,0 +1,16 @@
+{
+  "core_sha256": "6c19a32afd35d42fc7bdfd4b9554fb10141afb5bf131e77fa3e4826c6b657970",
+  "base_core_sha256": "a962df3f738aa94c68b6fb05331a081b9ecb45bdfc1ebf18ca2f418ee79f0501",
+  "sources": {
+    "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/historical_correlation_repair_20261126/observed_query_v3/prior_chart_continuity_v4/src/block_lm_metric.h": "600e5f6e182218d254a066b41d140ce946f4200cbca1a3412ed056f18d41bffd",
+    "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/historical_correlation_repair_20261126/observed_query_v3/prior_chart_continuity_v4/src/consistent_prior_chart.h": "66a6134db8931acc9e2aae1fac6b9ab89acdb1dcfe642fc38bfe7fbe4a20090d",
+    "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/historical_correlation_repair_20261126/observed_query_v3/prior_chart_continuity_v4/src/history_archive.cpp": "a8734cb963baac486ec885704389299776d24dc950269230a11d0ec030e023f4",
+    "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/historical_correlation_repair_20261126/observed_query_v3/prior_chart_continuity_v4/src/history_archive.h": "6e2f2ea2ee24f52aa8ca9718bc29ff9f3169e186acbf22fbb3d763db3f73421f",
+    "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/historical_correlation_repair_20261126/observed_query_v3/prior_chart_continuity_v4/src/joint_online.cpp": "f7e609f66ef997440a5157fe540b606eb49890091b3d036923a371d37bf5fbaa",
+    "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/historical_correlation_repair_20261126/observed_query_v3/prior_chart_continuity_v4/src/joint_posterior.cpp": "f7d62bde4ec1c4e05c703e4dcd1008e53bfbb592a277872b63b1fe1993aa900a",
+    "/nas/shared_halo/baidx/cuVSLAM/cuvslam_runs/historical_correlation_repair_20261126/observed_query_v3/prior_chart_continuity_v4/src/observed_history_support.h": "6a1202c5a45f9e5a80cb083ea068fa0e662ec94e4682d1653b439ec019abf58f"
+  },
+  "changed_calls": 5,
+  "regression_returncode": 0,
+  "scope": "prior chart continuity repair only; candidate not adopted; six-room accuracy comparison required"
+}

@@ -1,3 +1,4 @@
+#include "affine_patch_consistency.h"
 
 /*
  * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
@@ -382,8 +383,9 @@ private:
 
       // Account for the fact that we subtract difference of means:
       // gx and gy are the entries of the jacobian matrix of the residual.
-      gx.array() -= gx.sum() / (float)gx.size();
-      gy.array() -= gy.sum() / (float)gy.size();
+      const float raw_mean_x = gx.sum() / float(gx.size()), raw_mean_y = gy.sum() / float(gy.size());
+      gx.array() -= raw_mean_x;
+      gy.array() -= raw_mean_y;
 
       const FeaturePatch gxgx = gx.cwiseProduct(gx);
       const FeaturePatch gxgy = gx.cwiseProduct(gy);
@@ -399,13 +401,14 @@ private:
       const float wr_gx = gaussian_weights(residual.cwiseProduct(gx));
       const float wr_gy = gaussian_weights(residual.cwiseProduct(gy));
 
-      {
+      if (!full_mapping) {
         const float determinant = w__gxgx * w__gygy - w__gxgy * w__gxgy;
         const Vector2T v((w__gygy * wr_gx - w__gxgy * wr_gy) / determinant,
                          (w__gxgx * wr_gy - w__gxgy * wr_gx) / determinant);
-        isConverged = (v.norm() < ST_CONVERGENCE_THRESHOLD);
+        isConverged = !full_mapping && (v.norm() < ST_CONVERGENCE_THRESHOLD);
 
         if (isConverged) {
+          if (n_full_mapping_iterations > 0) { i = n_shift_only_iterations - 1; isConverged = false; continue; }
           // TODO: investigate info matrix calculation,
           // now it's not correct and requires to use default info matrix
           // info <<
@@ -416,59 +419,18 @@ private:
       }
 
       if (full_mapping) {
-        const float wx_gxgx = gaussian_weights(x_patch.cwiseProduct(gxgx));
-        const float wx_gxgy = gaussian_weights(x_patch.cwiseProduct(gxgy));
-        const float wx_gygy = gaussian_weights(x_patch.cwiseProduct(gygy));
-
-        const float wy_gxgx = gaussian_weights(y_patch.cwiseProduct(gxgx));
-        const float wy_gxgy = gaussian_weights(y_patch.cwiseProduct(gxgy));
-        const float wy_gygy = gaussian_weights(y_patch.cwiseProduct(gygy));
-
-        const float wxxgxgx = gaussian_weights(xx_patch.cwiseProduct(gxgx));
-        const float wxxgxgy = gaussian_weights(xx_patch.cwiseProduct(gxgy));
-        const float wxxgygy = gaussian_weights(xx_patch.cwiseProduct(gygy));
-
-        const float wxygxgx = gaussian_weights(xy_patch.cwiseProduct(gxgx));
-        const float wxygxgy = gaussian_weights(xy_patch.cwiseProduct(gxgy));
-        const float wxygygy = gaussian_weights(xy_patch.cwiseProduct(gygy));
-
-        const float wyygxgx = gaussian_weights(yy_patch.cwiseProduct(gxgx));
-        const float wyygxgy = gaussian_weights(yy_patch.cwiseProduct(gxgy));
-        const float wyygygy = gaussian_weights(yy_patch.cwiseProduct(gygy));
-
-        const float wrxgx = gaussian_weights(residual.cwiseProduct(x_patch.cwiseProduct(gx)));
-        const float wrxgy = gaussian_weights(residual.cwiseProduct(x_patch.cwiseProduct(gy)));
-        const float wrygx = gaussian_weights(residual.cwiseProduct(y_patch.cwiseProduct(gx)));
-        const float wrygy = gaussian_weights(residual.cwiseProduct(y_patch.cwiseProduct(gy)));
-
-        Matrix6T t;
-        t << wxxgxgx, wxxgxgy, wxygxgx, wxygxgy, wx_gxgx, wx_gxgy, wxxgxgy, wxxgygy, wxygxgy, wxygygy, wx_gxgy, wx_gygy,
-            wxygxgx, wxygxgy, wyygxgx, wyygxgy, wy_gxgx, wy_gxgy, wxygxgy, wxygygy, wyygxgy, wyygygy, wy_gxgy, wy_gygy,
-            wx_gxgx, wx_gxgy, wy_gxgx, wy_gxgy, w__gxgx, w__gxgy, wx_gxgy, wx_gygy, wy_gxgy, wy_gygy, w__gxgy, w__gygy;
-
-        Vector6T a;
-        a << wrxgx, wrxgy, wrygx, wrygy, wr_gx, wr_gy;
-
-        const Vector6T z = t.colPivHouseholderQr().solve(a);
-        if (z.array().isNaN().any()) {
-          return false;
+        float gx_data[81], gy_data[81], residual_data[81], weights[81], normal[36], right[6];
+        for (int y=0;y<9;++y) for(int x=0;x<9;++x) { const int k=9*y+x;
+          gx_data[k]=gx(y,x); gy_data[k]=gy(y,x); residual_data[k]=residual(y,x);
+          FeaturePatch unit=FeaturePatch::Zero();unit(y,x)=1.f;weights[k]=gaussian_weights(unit);
         }
-
-        const float& dxx = z(0);
-        const float& dyx = z(1);
-        const float& dxy = z(2);
-        const float& dyy = z(3);
-        const float& dx = z(4);
-        const float& dy = z(5);
-
-        Matrix2T z_map;
-        z_map << dxx, dxy, dyx, dyy;
-
-        const Vector2T z_xy(dx, dy);
-
-        map_ += z_map;
-
-        xy_ += z_xy;
+        affine_patch::CenteredNormal9(gx_data,gy_data,raw_mean_x,raw_mean_y,residual_data,weights,normal,right);
+        Matrix6T t;Vector6T a;for(int i=0;i<6;++i){a[i]=right[i];for(int j=0;j<6;++j)t(i,j)=normal[6*i+j];}
+        const Vector6T z=t.colPivHouseholderQr().solve(a);
+        if (!z.allFinite()) return false;
+        Matrix2T update;update<<z[0],z[2],z[1],z[3];map_+=update;xy_+=Vector2T(z[4],z[5]);
+        isConverged=affine_patch::MaxWarpSquared9(z.data())<ST_CONVERGENCE_THRESHOLD*ST_CONVERGENCE_THRESHOLD;
+        if(isConverged)break;
       } else {
         Matrix2T t;
         t << w__gxgx, w__gxgy, w__gxgy, w__gygy;

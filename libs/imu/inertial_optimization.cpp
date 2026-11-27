@@ -98,6 +98,10 @@ void AuditInit(const char* stage, const std::vector<Pose>& poses, const Matrix3T
     AuditArray(out, poses[i].w_from_imu.translation());
     out << ",\"v\":";
     AuditArray(out, poses[i].velocity);
+    out << ",\"bg\":";
+    AuditArray(out, poses[i].gyro_bias);
+    out << ",\"ba\":";
+    AuditArray(out, poses[i].acc_bias);
     out << '}';
   }
   out << "],\"edges\":[";
@@ -710,6 +714,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
 
   // Each call: solve gyro bias, then jointly estimate velocities + gravity via linear system,
   // then refine gravity in 2D tangent space (VINS-Mono LinearAlignment + RefineGravity approach).
+  AuditInit("input", poses, Rgravity, poses.front().gyro_bias, poses.front().acc_bias, acc_prior_info);
   Vector3T gyro_bias = SolveGyroBias(poses);
 
   // Reintegrate with new gyro bias for accurate dP/dV in LinearAlignment/RefineGravity
@@ -727,6 +732,7 @@ bool InertialOptimizer::optimize_inertial(std::vector<Pose>& poses, const imu::I
     TraceMessage("INERTIAL_INIT_REJECT reason=linear_alignment");
     return false;
   }
+  AuditInit("linear", poses, Rgravity, gyro_bias, acc_bias, acc_prior_info);
   RefineGravity(poses, gyro_bias, Rgravity, acc_bias);
   AuditInit("refined", poses, Rgravity, gyro_bias, acc_bias, acc_prior_info);
 

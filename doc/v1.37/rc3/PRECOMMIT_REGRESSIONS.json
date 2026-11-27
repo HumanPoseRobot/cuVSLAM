@@ -1,0 +1,42 @@
+{
+  "completed": "2026-11-27T10:15:38.800175+08:00",
+  "passed": true,
+  "tests": [
+    {
+      "name": "seal_guards",
+      "returncode": 0
+    },
+    {
+      "name": "ownership_and_charts",
+      "returncode": 0
+    },
+    {
+      "name": "history_chain",
+      "returncode": 0
+    },
+    {
+      "name": "room6_initial_information",
+      "returncode": 0
+    },
+    {
+      "name": "room6_observed_query",
+      "returncode": 0
+    },
+    {
+      "name": "room2_initial_information",
+      "returncode": 0
+    },
+    {
+      "name": "room2_observed_query",
+      "returncode": 0
+    },
+    {
+      "name": "room5_initial_information",
+      "returncode": 0
+    },
+    {
+      "name": "room5_observed_query",
+      "returncode": 0
+    }
+  ]
+}

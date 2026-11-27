@@ -12,6 +12,9 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
+# Shared CPU/GPU affine patch model; no extra numerical implementation.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../cuda_modules/cuda_kernels)
+
 set(MODULE_NAME "sof")
 
 set(HEADERS
